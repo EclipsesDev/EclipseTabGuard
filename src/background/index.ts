@@ -1,6 +1,6 @@
 export {};
 
-import type { Settings, TabRecord } from "../types/index.js";
+import type { Settings, TabRecord, TabInfo } from "../types/index.js";
 import { DEFAULT_SETTINGS } from "../types/index.js";
 
 // In-memory tab activity map
@@ -23,7 +23,7 @@ async function saveActivity(map: Map<number, number>): Promise<void> {
 }
 
 async function loadSettings(): Promise<Settings> {
-  const result = await chrome.storage.sync.get(SETTINGS_KEY);
+  const result = await chrome.storage.local.get(SETTINGS_KEY);
   return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
 }
 
@@ -109,16 +109,32 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 async function init(): Promise<void> {
-  // Seed activity for all currently open tabs
-  const activity = await loadActivity();
+  const settings = await loadSettings();
+  const existingActivity = await loadActivity();
+  const isFreshStart = existingActivity.size === 0;
+
+  const activity = existingActivity;
   const tabs = await chrome.tabs.query({});
   const now = Date.now();
+
   for (const tab of tabs) {
-    if (tab.id != null && !activity.has(tab.id)) {
-      activity.set(tab.id, tab.lastAccessed ?? now);
+    if (tab.id == null) continue;
+    if (!activity.has(tab.id)) {
+      // On fresh browser start with suspendOnStartup: mark all non-active tabs as expired
+      const isActive = tab.active;
+      if (isFreshStart && settings.suspendOnStartup && !isActive) {
+        activity.set(tab.id, 0);
+      } else {
+        activity.set(tab.id, tab.lastAccessed ?? now);
+      }
     }
   }
   await saveActivity(activity);
+
+  // If fresh start + suspendOnStartup, run a check immediately
+  if (isFreshStart && settings.suspendOnStartup && settings.enabled) {
+    await runSuspensionCheck();
+  }
 
   // Ensure the periodic alarm is running
   const existing = await chrome.alarms.get(ALARM_NAME);
@@ -149,8 +165,42 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tabs.reload(tabId, {}, () => sendResponse({ ok: true }));
     return true;
   }
+
+  if (msg.type === "getTabs") {
+    (async () => {
+      const tabs = await chrome.tabs.query({});
+      const result: TabInfo[] = tabs.map((t) => ({
+        id: t.id ?? -1,
+        title: t.title ?? "",
+        url: t.url ?? "",
+        favIconUrl: t.favIconUrl ?? "",
+        discarded: t.discarded ?? false,
+        active: t.active ?? false,
+        pinned: t.pinned ?? false,
+        windowId: t.windowId,
+      }));
+      sendResponse(result);
+    })();
+    return true;
+  }
+
+  if (msg.type === "focusTab") {
+    const tabId = msg.tabId as number;
+    const windowId = msg.windowId as number;
+    chrome.tabs.update(tabId, { active: true }, () => {
+      chrome.windows.update(windowId, { focused: true }, () => sendResponse({ ok: true }));
+    });
+    return true;
+  }
 });
 
 export type StatsResponse = { total: number; active: number; suspended: number };
+
+// Keep service worker alive while the popup is open
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === "popup") {
+    port.onDisconnect.addListener(() => { /* popup closed */ });
+  }
+});
 
 void init();

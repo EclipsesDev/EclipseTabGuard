@@ -1,4 +1,4 @@
-import type { Settings } from "../types/index.js";
+import type { Settings, TabInfo } from "../types/index.js";
 import { DEFAULT_SETTINGS } from "../types/index.js";
 import type { StatsResponse } from "../background/index.js";
 
@@ -11,8 +11,7 @@ const statSuspended = document.getElementById("stat-suspended")!;
 const toggleEnabled = document.getElementById("toggle-enabled")  as HTMLInputElement;
 const togglePinned = document.getElementById("toggle-pinned")   as HTMLInputElement;
 const toggleAudible = document.getElementById("toggle-audible")  as HTMLInputElement;
-const toggleLoading = document.getElementById("toggle-loading")  as HTMLInputElement;
-const timeoutInput = document.getElementById("timeout-input")   as HTMLInputElement;
+const toggleLoading = document.getElementById("toggle-loading")  as HTMLInputElement;const toggleStartup  = document.getElementById("toggle-startup")  as HTMLInputElement;const timeoutInput = document.getElementById("timeout-input")   as HTMLInputElement;
 const whitelistInput = document.getElementById("whitelist-input") as HTMLInputElement;
 const blacklistInput = document.getElementById("blacklist-input") as HTMLInputElement;
 const whitelistListEl = document.getElementById("whitelist-list")!;
@@ -44,7 +43,7 @@ function animateCounter(el: HTMLElement, target: number, duration = 650): void {
 // Stats
 function refreshStats(): void {
   chrome.runtime.sendMessage({ type: "getStats" }, (resp: StatsResponse | undefined) => {
-    if (!resp) return;
+    if (chrome.runtime.lastError || !resp) return;
     animateCounter(statTotal, resp.total);
     animateCounter(statActive, resp.active);
     animateCounter(statSuspended, resp.suspended);
@@ -133,12 +132,13 @@ blacklistInput.addEventListener("keydown", (e) => {
 });
 
 // Load settings
-chrome.storage.sync.get(SETTINGS_KEY, (result) => {
+chrome.storage.local.get(SETTINGS_KEY, (result) => {
   const s: Settings = { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
   toggleEnabled.checked = s.enabled;
   togglePinned.checked   = s.skipPinned;
   toggleAudible.checked  = s.skipAudible;
   toggleLoading.checked  = s.skipLoading;
+  toggleStartup.checked  = s.suspendOnStartup ?? false;
   timeoutInput.value     = String(s.timeoutMinutes);
   whitelist = [...s.whitelist];
   blacklist = [...s.blacklist];
@@ -154,12 +154,13 @@ btnSave.addEventListener("click", () => {
     skipPinned:     togglePinned.checked,
     skipAudible:    toggleAudible.checked,
     skipLoading:    toggleLoading.checked,
+    suspendOnStartup: toggleStartup.checked,
     skipActive:     true,
     timeoutMinutes: timeout,
     whitelist,
     blacklist,
   };
-  chrome.storage.sync.set({ [SETTINGS_KEY]: s }, () => {
+  chrome.storage.local.set({ [SETTINGS_KEY]: s }, () => {
     toast.classList.add("show");
     setTimeout(() => toast.classList.remove("show"), 2000);
   });
@@ -167,8 +168,85 @@ btnSave.addEventListener("click", () => {
 
 // Suspend Now
 btnSuspendNow.addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "suspendNow" }, () => refreshStats());
+  chrome.runtime.sendMessage({ type: "suspendNow" }, () => {
+    if (chrome.runtime.lastError) return;
+    refreshStats();
+  });
 });
+
+// Tab list
+function renderTabList(tabs: TabInfo[]): void {
+  const listEl = document.getElementById("tab-list")!;
+  const emptyEl = document.getElementById("tab-list-empty")!;
+  listEl.innerHTML = "";
+  emptyEl.style.display = tabs.length ? "none" : "block";
+
+  for (const tab of tabs) {
+    const li = document.createElement("li");
+    li.className = "tab-item";
+
+    // Favicon
+    if (tab.favIconUrl) {
+      const img = document.createElement("img");
+      img.className = "tab-favicon";
+      img.src = tab.favIconUrl;
+      img.onerror = () => img.replaceWith(placeholder());
+      li.appendChild(img);
+    } else {
+      li.appendChild(placeholder());
+    }
+
+    // Info
+    const info = document.createElement("div");
+    info.className = "tab-info";
+    const titleEl = document.createElement("div");
+    titleEl.className = "tab-title";
+    titleEl.textContent = tab.title || tab.url || "(no title)";
+    const domainEl = document.createElement("div");
+    domainEl.className = "tab-domain";
+    try { domainEl.textContent = new URL(tab.url).hostname; } catch { domainEl.textContent = ""; }
+    info.appendChild(titleEl);
+    info.appendChild(domainEl);
+    li.appendChild(info);
+
+    // Badge
+    const badge = document.createElement("span");
+    badge.className = "tab-badge " + (tab.pinned ? "badge-pinned" : tab.discarded ? "badge-suspended" : "badge-active");
+    badge.textContent = tab.pinned ? "Pinned" : tab.discarded ? "Suspended" : "Active";
+    li.appendChild(badge);
+
+    li.addEventListener("click", () => {
+      chrome.runtime.sendMessage({ type: "focusTab", tabId: tab.id, windowId: tab.windowId }, () => {
+        void chrome.runtime.lastError;
+      });
+    });
+
+    listEl.appendChild(li);
+  }
+}
+
+function placeholder(): HTMLDivElement {
+  const d = document.createElement("div");
+  d.className = "tab-favicon-placeholder";
+  return d;
+}
+
+function refreshTabList(): void {
+  chrome.runtime.sendMessage({ type: "getTabs" }, (tabs: TabInfo[] | undefined) => {
+    if (chrome.runtime.lastError || !tabs) return;
+    renderTabList(tabs);
+  });
+}
+
+// Refresh tab list when Tabs panel is opened
+document.querySelectorAll<HTMLButtonElement>(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset["tab"] === "tabs") refreshTabList();
+  });
+});
+
+// Connect to wake + keep service worker alive for the popup's lifetime
+const _port = chrome.runtime.connect({ name: "popup" });
 
 // Init
 refreshStats();

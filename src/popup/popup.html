@@ -290,6 +290,65 @@
       padding: 14px 0 4px;
     }
 
+    /* Tab list */
+    .tab-list {
+      list-style: none;
+      max-height: 148px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2e2e4a transparent;
+    }
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 0.15s var(--ease);
+      animation: slideIn 0.15s var(--ease);
+      margin-bottom: 2px;
+    }
+    .tab-item:hover { background: var(--surface2); }
+    .tab-favicon {
+      width: 14px; height: 14px;
+      flex-shrink: 0;
+      border-radius: 2px;
+      object-fit: contain;
+    }
+    .tab-favicon-placeholder {
+      width: 14px; height: 14px;
+      flex-shrink: 0;
+      background: #2e2e4a;
+      border-radius: 2px;
+    }
+    .tab-info { flex: 1; min-width: 0; }
+    .tab-title {
+      font-size: 11px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tab-domain {
+      font-size: 10px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tab-badge {
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 20px;
+      flex-shrink: 0;
+      letter-spacing: 0.03em;
+    }
+    .badge-active   { background: rgba(124,58,237,0.2); color: var(--accent-light); }
+    .badge-suspended { background: rgba(100,100,140,0.2); color: #666; }
+    .badge-pinned   { background: rgba(251,191,36,0.15); color: #fbbf24; }
+
     /* ── Actions ── */
     .actions {
       display: flex;
@@ -377,6 +436,7 @@
     <button class="tab-btn active" data-tab="settings">Settings</button>
     <button class="tab-btn" data-tab="whitelist">Whitelist</button>
     <button class="tab-btn" data-tab="blacklist">Blacklist</button>
+    <button class="tab-btn" data-tab="tabs">Tabs</button>
   </div>
 
   <!-- Panels -->
@@ -395,6 +455,10 @@
       <div class="row">
         <span class="row-label">Skip loading tabs</span>
         <label class="toggle"><input type="checkbox" id="toggle-loading"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span class="row-label">Suspend all tabs on startup</span>
+        <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
       </div>
       <div class="field">
         <span class="field-label">Suspend after</span>
@@ -421,6 +485,12 @@
       </div>
       <ul class="domain-list" id="blacklist-list"></ul>
       <div class="empty-hint" id="blacklist-empty">No blacklisted domains — these tabs are always suspended immediately.</div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="panel" id="panel-tabs">
+      <ul class="tab-list" id="tab-list"></ul>
+      <div class="empty-hint" id="tab-list-empty">No tabs found.</div>
     </div>
 
   </div>
