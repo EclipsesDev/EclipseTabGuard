@@ -16,18 +16,6 @@ EclipseTabGuard automatically **discards** (suspends) browser tabs that haven't 
 | Configurable timeout | 30 minutes |
 | Per-domain whitelist | empty |
 
-## Project structure
-
-```
-src/
-  background/index.ts   # Service worker: activity tracking + alarm-based suspension
-  popup/
-    popup.html          # Extension popup UI
-    popup.ts            # Popup logic (settings, stats, whitelist)
-  types/index.ts        # Shared Settings type + defaults
-manifest.json
-```
-
 ## Development
 
 ```bash
