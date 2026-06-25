@@ -35,6 +35,12 @@ Load the `dist/` folder as an unpacked extension in your browser.
 | `alarms` | Periodic check every 1 minute |
 | `idle` | Reserved for future idle-state awareness |
 
+## Privacy
+
+EclipseTabGuard does not collect, store, or transmit any user data.
+
+All suspension logic runs entirely on your device. The extension reads tab metadata (URL hostname, active/pinned/audible state) solely to decide whether to suspend a tab — this data is never sent anywhere, logged, or shared with any third party.
+
 ## License
 
 MIT
