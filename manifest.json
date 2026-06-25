@@ -23,6 +23,7 @@
         "default_title": "EclipseTabGuard"
     },
     "background": {
+        "service_worker": "background/index.js",
         "scripts": ["background/index.js"]
     },
     "permissions": [
