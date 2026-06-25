@@ -23,7 +23,7 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 | Skip pinned tabs | off |
 | Skip tabs playing audio | on |
 | Skip tabs still loading | on |
-| Suspend on startup | off |
+| Suspend on startup | true |
 | Inactivity timeout | 3 minutes |
 
 ## Storage
