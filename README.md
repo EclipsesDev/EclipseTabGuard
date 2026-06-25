@@ -20,7 +20,7 @@ EclipseTabGuard automatically **discards** (suspends) browser tabs that haven't 
 
 ```bash
 npm install
-npm run build      # typecheck → compile → copy assets → dist/
+npm run build      # typecheck -> compile -> copy assets -> dist/
 npm run package    # build + zip to eclipsetabguard.zip
 ```
 
