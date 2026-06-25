@@ -1,0 +1,156 @@
+export {};
+
+import type { Settings, TabRecord } from "../types/index.js";
+import { DEFAULT_SETTINGS } from "../types/index.js";
+
+// In-memory tab activity map
+// Persisted to storage.session so it survives service-worker restarts.
+const ACTIVITY_KEY = "tabActivity";
+const SETTINGS_KEY = "settings";
+const ALARM_NAME = "suspendCheck";
+const CHECK_INTERVAL_MINUTES = 1;
+
+async function loadActivity(): Promise<Map<number, number>> {
+  const result = await chrome.storage.session.get(ACTIVITY_KEY);
+  const raw = (result[ACTIVITY_KEY] ?? {}) as Record<string, number>;
+  return new Map(Object.entries(raw).map(([k, v]) => [Number(k), v]));
+}
+
+async function saveActivity(map: Map<number, number>): Promise<void> {
+  const raw: Record<string, number> = {};
+  for (const [k, v] of map) raw[String(k)] = v;
+  await chrome.storage.session.set({ [ACTIVITY_KEY]: raw });
+}
+
+async function loadSettings(): Promise<Settings> {
+  const result = await chrome.storage.sync.get(SETTINGS_KEY);
+  return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
+}
+
+function matchesDomainList(url: string, patterns: string[]): boolean {
+  try {
+    const hostname = new URL(url).hostname;
+    return patterns.some((p) => hostname === p || hostname.endsWith(`.${p}`));
+  } catch {
+    return false;
+  }
+}
+
+async function runSuspensionCheck(): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.enabled) return;
+
+  const activity = await loadActivity();
+  const now = Date.now();
+  const thresholdMs = settings.timeoutMinutes * 60 * 1000;
+
+  const tabs = await chrome.tabs.query({});
+  const activeTabIds = new Set(
+    (await chrome.tabs.query({ active: true })).map((t) => t.id)
+  );
+
+  for (const tab of tabs) {
+    if (tab.id == null || tab.discarded) continue;
+    if (settings.skipPinned && tab.pinned) continue;
+    if (settings.skipAudible && tab.audible) continue;
+    if (settings.skipActive && activeTabIds.has(tab.id)) continue;
+    if (settings.skipLoading && tab.status === "loading") continue;
+
+    const url = tab.url ?? "";
+
+    // Whitelist: never suspend
+    if (url && matchesDomainList(url, settings.whitelist)) continue;
+
+    // Blacklist: always suspend immediately (ignore timeout)
+    const forceDiscard = url && matchesDomainList(url, settings.blacklist ?? []);
+
+    const lastActive = activity.get(tab.id) ?? tab.lastAccessed ?? 0;
+    if (forceDiscard || now - lastActive >= thresholdMs) {
+      try {
+        await chrome.tabs.discard(tab.id);
+      } catch {
+        // Tab may have been closed or is not discardable — ignore.
+      }
+    }
+  }
+}
+
+async function recordActivity(tabId: number): Promise<void> {
+  const activity = await loadActivity();
+  activity.set(tabId, Date.now());
+  await saveActivity(activity);
+}
+
+async function removeTabRecord(tabId: number): Promise<void> {
+  const activity = await loadActivity();
+  activity.delete(tabId);
+  await saveActivity(activity);
+}
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  void recordActivity(tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void removeTabRecord(tabId);
+});
+
+// Track when a tab finishes loading (new page to reset timer)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "complete") {
+    void recordActivity(tabId);
+  }
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === ALARM_NAME) {
+    void runSuspensionCheck();
+  }
+});
+
+async function init(): Promise<void> {
+  // Seed activity for all currently open tabs
+  const activity = await loadActivity();
+  const tabs = await chrome.tabs.query({});
+  const now = Date.now();
+  for (const tab of tabs) {
+    if (tab.id != null && !activity.has(tab.id)) {
+      activity.set(tab.id, tab.lastAccessed ?? now);
+    }
+  }
+  await saveActivity(activity);
+
+  // Ensure the periodic alarm is running
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  if (!existing) {
+    chrome.alarms.create(ALARM_NAME, { periodInMinutes: CHECK_INTERVAL_MINUTES });
+  }
+}
+
+// Handle messages from the popup
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "getStats") {
+    (async () => {
+      const tabs = await chrome.tabs.query({});
+      const suspended = tabs.filter((t) => t.discarded).length;
+      const active = tabs.length - suspended;
+      sendResponse({ total: tabs.length, active, suspended } satisfies StatsResponse);
+    })();
+    return true;
+  }
+
+  if (msg.type === "suspendNow") {
+    runSuspensionCheck().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (msg.type === "resumeTab") {
+    const tabId = msg.tabId as number;
+    chrome.tabs.reload(tabId, {}, () => sendResponse({ ok: true }));
+    return true;
+  }
+});
+
+export type StatsResponse = { total: number; active: number; suspended: number };
+
+void init();

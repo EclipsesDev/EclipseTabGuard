@@ -1,0 +1,45 @@
+{
+  "name": "eclipsetabguard",
+  "version": "1.0.0",
+  "description": "Smart tab suspender browser extension",
+  "main": "index.js",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "engines": {
+    "node": ">= 14.0.0",
+    "npm": ">= 6.0.0"
+  },
+  "homepage": "",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "bugs": "",
+  "keywords": [
+    "browser-extension",
+    "tab-manager",
+    "memory",
+    "performance"
+  ],
+  "author": {
+    "name": "",
+    "email": "",
+    "url": ""
+  },
+  "contributors": [],
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc --noEmit",
+    "compile": "esbuild src/popup/popup.ts src/background/index.ts --outdir=dist --outbase=src --bundle --minify --target=esnext",
+    "copy-assets": "node -e \"const fs=require('fs');fs.cpSync('manifest.json','dist/manifest.json');fs.mkdirSync('dist/popup',{recursive:true});fs.cpSync('src/popup/popup.html','dist/popup/popup.html');fs.cpSync('src/icons','dist/icons',{recursive:true})\"",
+    "build": "npm run clean && npm run typecheck && npm run compile && npm run copy-assets",
+    "package": "npm run build && cd dist && tar -cf ../eclipsetabguard.zip --format=zip *"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.39",
+    "esbuild": "^0.28.0",
+    "sharp": "^0.35.2",
+    "typescript": "^6.0.2"
+  }
+}

@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --bg: #0d0d1a;
+      --surface: #16162a;
+      --surface2: #1e1e35;
+      --accent: #7c3aed;
+      --accent-light: #a78bfa;
+      --accent-glow: rgba(124,58,237,0.22);
+      --danger: #ef4444;
+      --danger-glow: rgba(239,68,68,0.18);
+      --success: #86efac;
+      --text: #e2e2f0;
+      --muted: #666;
+      --radius: 10px;
+      --ease: cubic-bezier(0.4,0,0.2,1);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px system-ui, sans-serif;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px 0;
+    }
+    .header img { width: 26px; height: 26px; border-radius: 6px; }
+    .header-title {
+      flex: 1;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent-light);
+      letter-spacing: 0.01em;
+    }
+    .toggle-sm { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle-sm input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .slider-sm {
+      position: absolute; inset: 0;
+      background: #2a2a40;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s var(--ease);
+    }
+    .slider-sm::before {
+      content: "";
+      position: absolute;
+      width: 14px; height: 14px;
+      left: 3px; top: 3px;
+      background: #666;
+      border-radius: 50%;
+      transition: transform 0.25s var(--ease), background 0.2s, box-shadow 0.2s;
+    }
+    .toggle-sm input:checked + .slider-sm { background: var(--accent); }
+    .toggle-sm input:checked + .slider-sm::before {
+      transform: translateX(16px);
+      background: #fff;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    /* ── Stats ── */
+    .stats {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+    }
+    .stat {
+      flex: 1;
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 10px 6px;
+      text-align: center;
+      border: 1px solid #1e1e35;
+      cursor: default;
+      transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+      position: relative;
+      overflow: hidden;
+    }
+    .stat::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: var(--radius);
+      background: radial-gradient(circle at 50% 0%, var(--accent-glow), transparent 70%);
+      opacity: 0;
+      transition: opacity 0.3s var(--ease);
+    }
+    .stat:hover { border-color: var(--accent); box-shadow: 0 0 12px var(--accent-glow); }
+    .stat:hover::after { opacity: 1; }
+    .stat-num {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent-light);
+      line-height: 1;
+      display: inline-block;
+      min-width: 2ch;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-label { font-size: 10px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      margin: 0 16px;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 6px 4px;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: color 0.15s var(--ease), background 0.15s var(--ease), transform 0.1s;
+    }
+    .tab-btn:active { transform: scale(0.95); }
+    .tab-btn.active { background: var(--accent); color: #fff; }
+    .tab-btn:not(.active):hover { color: var(--text); background: var(--surface2); }
+
+    /* ── Panels ── */
+    .panels { padding: 12px 16px 0; min-height: 148px; }
+    .panel { display: none; animation: fadeUp 0.18s var(--ease); }
+    .panel.active { display: block; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(7px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Settings panel ── */
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #1a1a2e;
+    }
+    .row:last-of-type { border-bottom: none; }
+    .row-label { font-size: 12px; color: #c0c0d8; }
+
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .slider {
+      position: absolute; inset: 0;
+      background: #2a2a40;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s var(--ease);
+    }
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 14px; height: 14px;
+      left: 3px; top: 3px;
+      background: #666;
+      border-radius: 50%;
+      transition: transform 0.25s var(--ease), background 0.2s, box-shadow 0.2s;
+    }
+    .toggle input:checked + .slider { background: var(--accent); }
+    .toggle input:checked + .slider::before {
+      transform: translateX(16px);
+      background: #fff;
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0 2px;
+    }
+    .field-label { font-size: 12px; color: #c0c0d8; flex: 1; }
+    .field input[type="number"] {
+      width: 58px;
+      padding: 5px 8px;
+      background: var(--surface);
+      border: 1px solid #2e2e4a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      text-align: right;
+      outline: none;
+      transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    }
+    .field input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    .field-unit { font-size: 11px; color: var(--muted); }
+
+    /* ── Domain panels ── */
+    .domain-input-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .domain-input-row input {
+      flex: 1;
+      padding: 6px 10px;
+      background: var(--surface);
+      border: 1px solid #2e2e4a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    }
+    .domain-input-row input::placeholder { color: #383855; }
+    .domain-input-row input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    #blacklist-input:focus {
+      border-color: var(--danger);
+      box-shadow: 0 0 0 2px var(--danger-glow);
+    }
+
+    .btn-add {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: filter 0.15s, transform 0.1s var(--ease);
+    }
+    .btn-add:active { transform: scale(0.92); }
+    .btn-add-white { background: var(--accent); color: #fff; }
+    .btn-add-white:hover { filter: brightness(1.15); }
+    .btn-add-black { background: var(--danger); color: #fff; }
+    .btn-add-black:hover { filter: brightness(1.15); }
+
+    .domain-list {
+      list-style: none;
+      max-height: 96px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2e2e4a transparent;
+    }
+    .domain-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 10px;
+      background: var(--surface);
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 12px;
+      border-left: 2px solid transparent;
+      animation: slideIn 0.15s var(--ease);
+    }
+    .whitelist-item { border-left-color: var(--accent); }
+    .blacklist-item { border-left-color: var(--danger); }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-8px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .domain-list li button {
+      background: none;
+      border: none;
+      color: #444;
+      cursor: pointer;
+      font-size: 17px;
+      line-height: 1;
+      padding: 0 2px;
+      transition: color 0.15s, transform 0.15s var(--ease);
+    }
+    .domain-list li button:hover { color: var(--danger); transform: scale(1.25) rotate(10deg); }
+
+    .empty-hint {
+      font-size: 11px;
+      color: #383855;
+      text-align: center;
+      padding: 14px 0 4px;
+    }
+
+    /* ── Actions ── */
+    .actions {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px 16px;
+    }
+    .btn {
+      flex: 1;
+      padding: 9px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: filter 0.15s, transform 0.1s var(--ease);
+    }
+    .btn:active { transform: scale(0.95); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { filter: brightness(1.12); }
+    .btn-secondary { background: var(--surface); color: #999; border: 1px solid #232340; }
+    .btn-secondary:hover { background: var(--surface2); color: var(--text); }
+
+    /* Ripple */
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.22);
+      transform: scale(0);
+      animation: ripple 0.55s linear;
+      pointer-events: none;
+    }
+    @keyframes ripple { to { transform: scale(4); opacity: 0; } }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 12px; left: 50%;
+      transform: translateX(-50%) translateY(16px);
+      background: #0e1e14;
+      border: 1px solid #1a3a22;
+      color: var(--success);
+      font-size: 11px;
+      padding: 6px 16px;
+      border-radius: 20px;
+      opacity: 0;
+      pointer-events: none;
+      white-space: nowrap;
+      transition: opacity 0.22s var(--ease), transform 0.22s var(--ease);
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <img src="../icons/icon-48.png" alt="">
+    <span class="header-title">EclipseTabGuard</span>
+    <label class="toggle-sm" title="Enable / disable auto-suspend">
+      <input type="checkbox" id="toggle-enabled">
+      <span class="slider-sm"></span>
+    </label>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num" id="stat-total">0</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="stat-active">0</div>
+      <div class="stat-label">Active</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="stat-suspended">0</div>
+      <div class="stat-label">Suspended</div>
+    </div>
+  </div>
+
+  <!-- Tab bar -->
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="settings">Settings</button>
+    <button class="tab-btn" data-tab="whitelist">Whitelist</button>
+    <button class="tab-btn" data-tab="blacklist">Blacklist</button>
+  </div>
+
+  <!-- Panels -->
+  <div class="panels">
+
+    <!-- Settings -->
+    <div class="panel active" id="panel-settings">
+      <div class="row">
+        <span class="row-label">Skip pinned tabs</span>
+        <label class="toggle"><input type="checkbox" id="toggle-pinned"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span class="row-label">Skip audible tabs</span>
+        <label class="toggle"><input type="checkbox" id="toggle-audible"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span class="row-label">Skip loading tabs</span>
+        <label class="toggle"><input type="checkbox" id="toggle-loading"><span class="slider"></span></label>
+      </div>
+      <div class="field">
+        <span class="field-label">Suspend after</span>
+        <input type="number" id="timeout-input" min="1" max="1440" value="30">
+        <span class="field-unit">min</span>
+      </div>
+    </div>
+
+    <!-- Whitelist -->
+    <div class="panel" id="panel-whitelist">
+      <div class="domain-input-row">
+        <input type="text" id="whitelist-input" placeholder="e.g. github.com">
+        <button class="btn-add btn-add-white" id="add-whitelist">Add</button>
+      </div>
+      <ul class="domain-list" id="whitelist-list"></ul>
+      <div class="empty-hint" id="whitelist-empty">No whitelisted domains — these tabs are never suspended.</div>
+    </div>
+
+    <!-- Blacklist -->
+    <div class="panel" id="panel-blacklist">
+      <div class="domain-input-row">
+        <input type="text" id="blacklist-input" placeholder="e.g. reddit.com">
+        <button class="btn-add btn-add-black" id="add-blacklist">Add</button>
+      </div>
+      <ul class="domain-list" id="blacklist-list"></ul>
+      <div class="empty-hint" id="blacklist-empty">No blacklisted domains — these tabs are always suspended immediately.</div>
+    </div>
+
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-save">Save</button>
+    <button class="btn btn-secondary" id="btn-suspend-now">Suspend Now</button>
+  </div>
+
+  <div class="toast" id="toast">Settings saved!</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 300px;
+      padding: 16px;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      font: 13px system-ui, sans-serif;
+    }
+
+    /* Header */
+    h2 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #a78bfa;
+      margin-bottom: 14px;
+    }
+    h2 img { width: 24px; height: 24px; }
+
+    /* Stats bar */
+    .stats {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .stat {
+      flex: 1;
+      background: #1c1c30;
+      border-radius: 8px;
+      padding: 8px;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 22px;
+      font-weight: 700;
+      color: #a78bfa;
+    }
+    .stat-label { font-size: 10px; color: #888; margin-top: 2px; }
+
+    /* Toggle row */
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .row label { font-size: 12px; color: #aaa; }
+
+    /* Toggle switch */
+    .toggle { position: relative; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: #333;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 14px; height: 14px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider { background: #7c3aed; }
+    .toggle input:checked + .slider::before { transform: translateX(16px); }
+
+    /* Timeout input */
+    .field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .field label { font-size: 12px; color: #aaa; flex: 1; }
+    .field input[type="number"] {
+      width: 60px;
+      padding: 5px 8px;
+      background: #1c1c30;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      text-align: right;
+      outline: none;
+    }
+    .field input[type="number"]:focus { border-color: #7c3aed; }
+    .field span { font-size: 11px; color: #666; }
+
+    /* Section headings */
+    .section-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #555;
+      margin: 14px 0 6px;
+    }
+
+    /* Whitelist */
+    .whitelist-input-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .whitelist-input-row input {
+      flex: 1;
+      padding: 5px 8px;
+      background: #1c1c30;
+      border: 1px solid #444;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+    }
+    .whitelist-input-row input:focus { border-color: #7c3aed; }
+    .whitelist-input-row input::placeholder { color: #555; }
+    #add-whitelist {
+      padding: 5px 10px;
+      background: #7c3aed;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    #add-whitelist:hover { background: #6d28d9; }
+    #whitelist-list { list-style: none; }
+    #whitelist-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      background: #1c1c30;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    #whitelist-list li button {
+      background: none;
+      border: none;
+      color: #ef4444;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    #whitelist-list li button:hover { color: #fca5a5; }
+
+    /* Action buttons */
+    .actions { display: flex; gap: 8px; margin-top: 14px; }
+    .btn {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #7c3aed; color: #fff; }
+    .btn-secondary { background: #1c1c30; color: #aaa; border: 1px solid #333; }
+
+    /* Saved message */
+    .saved {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #86efac;
+      opacity: 0;
+      text-align: center;
+      transition: opacity 0.2s;
+    }
+    .saved.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h2>
+    <img src="../icons/icon-48.png" alt="">
+    EclipseTabGuard
+  </h2>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-num" id="stat-total">–</div>
+      <div class="stat-label">Total Tabs</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="stat-active">–</div>
+      <div class="stat-label">Active</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num" id="stat-suspended">–</div>
+      <div class="stat-label">Suspended</div>
+    </div>
+  </div>
+
+  <!-- Enable toggle -->
+  <div class="row">
+    <label for="toggle-enabled">Enable auto-suspend</label>
+    <label class="toggle">
+      <input type="checkbox" id="toggle-enabled">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <!-- Skip pinned -->
+  <div class="row">
+    <label for="toggle-pinned">Skip pinned tabs</label>
+    <label class="toggle">
+      <input type="checkbox" id="toggle-pinned">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <!-- Skip audible -->
+  <div class="row">
+    <label for="toggle-audible">Skip tabs playing audio</label>
+    <label class="toggle">
+      <input type="checkbox" id="toggle-audible">
+      <span class="slider"></span>
+    </label>
+  </div>
+
+  <!-- Timeout -->
+  <div class="field">
+    <label for="timeout-input">Suspend after inactivity of</label>
+    <input type="number" id="timeout-input" min="1" max="1440" value="30">
+    <span>min</span>
+  </div>
+
+  <!-- Whitelist -->
+  <div class="section-title">Whitelisted Domains</div>
+  <div class="whitelist-input-row">
+    <input type="text" id="whitelist-input" placeholder="e.g. github.com">
+    <button id="add-whitelist">Add</button>
+  </div>
+  <ul id="whitelist-list"></ul>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn btn-primary" id="btn-save">Save Settings</button>
+    <button class="btn btn-secondary" id="btn-suspend-now">Suspend Now</button>
+  </div>
+
+  <div class="saved" id="saved-msg">Settings saved!</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
