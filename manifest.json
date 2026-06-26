@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "EclipseTabGuard - Smart Tab Suspender",
     "description": "Automatically suspends inactive tabs to save memory, with smart rules to protect pinned, audible, and whitelisted tabs.",
-    "version": "1.0.4.3",
+    "version": "1.0.4.4",
     "browser_specific_settings": {
         "gecko": {
             "id": "eclipsetabguard@eclipsesdev",
@@ -32,8 +32,7 @@
         "alarms",
         "idle",
         "processes",
-        "scripting",
-        "webRequest"
+        "scripting"
     ],
     "host_permissions": [
         "<all_urls>"

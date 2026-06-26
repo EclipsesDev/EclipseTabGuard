@@ -156,12 +156,6 @@ function matchesDomainList(url: string, patterns: string[]): boolean {
 }
 
 async function runSuspensionCheck(): Promise<void> {
-  // Flush the bandwidth buffer collected since the last check
-  if (pendingBandwidthBytes > 0) {
-    const bytes = pendingBandwidthBytes;
-    pendingBandwidthBytes = 0;
-    await incrementLifetimeStats({ totalBandwidthBytes: bytes });
-  }
   const settings = await loadSettings();
   if (!settings.enabled) return;
 
@@ -224,29 +218,26 @@ async function incrementLifetimeStats(delta: Partial<LifetimeStats>): Promise<vo
   });
 }
 
-// We buffer bytes in memory rather than writing to storage on every network request
-// (pages can fire hundreds of requests, so batching is important).
-// The buffer gets flushed to persistent storage every minute when the alarm fires.
-let pendingBandwidthBytes = 0;
-
-// Listen to every network response from user tabs and pick up the Content-Length header.
-// This works for cross-origin CDN resources too, unlike PerformanceResourceTiming
-// which returns 0 for those without a Timing-Allow-Origin header.
-chrome.webRequest.onCompleted.addListener(
-  (details) => {
-    // tabId < 0 means the request came from the extension itself or a background context
-    if (details.tabId < 0) return;
-    const cl = details.responseHeaders?.find(
-      (h) => h.name.toLowerCase() === "content-length"
-    )?.value;
-    const bytes = cl ? parseInt(cl, 10) : 0;
-    if (Number.isFinite(bytes) && bytes > 0) {
-      pendingBandwidthBytes += bytes;
+// Asks the tab how many bytes it actually downloaded and saves that to our running total.
+// We use the browser's resource timing data, which tracks every request the page made.
+// Cache hits count as 0 bytes, so we don't inflate the numbers with repeated visits.
+async function measureAndRecordBandwidth(tabId: number): Promise<void> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+        return entries.reduce((sum, e) => sum + (e.transferSize ?? 0), 0);
+      },
+    });
+    const bytes = results?.[0]?.result;
+    if (typeof bytes === "number" && bytes > 0) {
+      await incrementLifetimeStats({ totalBandwidthBytes: bytes });
     }
-  },
-  { urls: ["<all_urls>"] },
-  ["responseHeaders"]
-);
+  } catch {
+    // Can't inject here (PDF viewer, extension page, etc.) — just skip it
+  }
+}
 
 async function recordActivity(tabId: number): Promise<void> {
   const activity = await loadActivity();
@@ -268,7 +259,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabRecord(tabId);
 });
 
-// Whenever a tab finishes loading, reset its idle timer and count the page load.
+// Whenever a tab finishes loading, reset its idle timer and record the bandwidth it used.
 // We only care about real web pages — not new tabs, about: pages, or extension UIs.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
@@ -276,6 +267,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const url = tab.url ?? "";
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void incrementLifetimeStats({ totalPageLoads: 1 });
+      void measureAndRecordBandwidth(tabId);
     }
   }
 });
