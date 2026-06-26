@@ -3,17 +3,131 @@ export {};
 import type { Settings, TabRecord, TabInfo } from "../types/index.js";
 import { DEFAULT_SETTINGS } from "../types/index.js";
 
-// In-memory tab activity map
-// Persisted to storage.session so it survives service-worker restarts.
+// Keeps track of when each tab was last used.
+// Stored in session storage so it survives service worker restarts.
 const ACTIVITY_KEY = "tabActivity";
 const SETTINGS_KEY = "settings";
 const LIFETIME_STATS_KEY = "lifetimeStats";
 const ALARM_NAME = "suspendCheck";
 const CHECK_INTERVAL_MINUTES = 1;
 
-// Estimates used for savings display
-const MEM_PER_TAB_MB = 100; // avg memory a background tab consumes
-const BW_PER_SUSPEND_MB = 2; // avg page weight prevented from reloading
+// Used when we can't get real memory data (e.g. Firefox without COOP/COEP pages)
+const MEM_PER_TAB_MB_FALLBACK = 100;
+// Best-guess for how much data a suspended tab would have consumed if left running
+const BW_PER_SUSPEND_MB = 2;
+
+// Chrome exposes process-level memory through chrome.processes, but it's not in
+// the standard type definitions, so we describe just the parts we actually use.
+interface ChromeProcess {
+  privateMemory?: number;
+}
+interface ChromeProcesses {
+  getProcessIdForTab(tabId: number, cb: (pid: number) => void): void;
+  getProcessInfo(
+    pids: number[],
+    includeMemory: boolean,
+    cb: (info: Record<number, ChromeProcess>) => void
+  ): void;
+}
+
+// This runs inside the tab itself to get its memory footprint.
+// Returns bytes if the browser supports it, null if there's nothing we can do.
+async function measureTabMemory(): Promise<number | null> {
+  // The modern way — gives accurate per-page memory, but only works if the
+  // page has COOP + COEP headers set (most sites don't bother)
+  if (typeof (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory === "function") {
+    try {
+      const r = await (performance as Performance & { measureUserAgentSpecificMemory: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory();
+      return r.bytes;
+    } catch {
+      // Page isn't cross-origin isolated, so this API throws — move on
+    }
+  }
+  // Older Chrome-only shortcut — shared across all tabs in the same process,
+  // so it can overcount when multiple tabs run in one renderer
+  const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+  if (mem) return mem.usedJSHeapSize;
+  return null;
+}
+
+// Figures out how much RAM the given tabs are currently using.
+// Tries the most accurate method first and falls back if something isn't available.
+async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<number> {
+  const tabIds = tabs.map((t) => t.id).filter((id): id is number => id != null);
+  if (tabIds.length === 0) return 0;
+
+  // Best option: Chrome's built-in process API gives us real private memory per process
+  const procs: ChromeProcesses | undefined =
+    typeof (chrome as unknown as Record<string, unknown>).processes === "object"
+      ? (chrome as unknown as { processes: ChromeProcesses }).processes
+      : undefined;
+
+  if (procs?.getProcessIdForTab) {
+    try {
+      const pids = await Promise.all(
+        tabIds.map(
+          (id) => new Promise<number>((resolve) => procs.getProcessIdForTab(id, resolve))
+        )
+      );
+      const uniquePids = [...new Set(pids.filter((p) => p >= 0))];
+      if (uniquePids.length > 0) {
+        const info = await new Promise<Record<number, ChromeProcess>>((resolve) =>
+          procs.getProcessInfo(uniquePids, true, resolve)
+        );
+        const totalBytes = Object.values(info).reduce(
+          (sum, p) => sum + (p.privateMemory ?? 0),
+          0
+        );
+        return totalBytes / (1024 * 1024);
+      }
+    } catch {
+      // Something went wrong with the processes API — try the next method
+    }
+  }
+
+  // Second option: inject a small script into each tab and ask it directly.
+  // Works on both Chrome and Firefox for normal web pages.
+  if (typeof chrome.scripting?.executeScript === "function") {
+    try {
+      let totalBytes = 0;
+      let measuredCount = 0;
+
+      await Promise.all(
+        tabs.map(async (tab) => {
+          if (tab.id == null) return;
+          const url = tab.url ?? "";
+          // We can't inject into browser-internal pages, so skip those
+          if (url.startsWith("about:") || url.startsWith("chrome:") || url.startsWith("moz-extension:") || url.startsWith("chrome-extension:") || url === "") return;
+          try {
+            const results = await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: measureTabMemory,
+            });
+            const bytes = results?.[0]?.result;
+            if (typeof bytes === "number") {
+              totalBytes += bytes;
+              measuredCount++;
+            }
+          } catch {
+            // Some tabs can't be injected into (PDFs, file:// pages, etc.) — just skip them
+          }
+        })
+      );
+
+      if (measuredCount > 0) {
+        const avgBytes = totalBytes / measuredCount;
+        // For tabs we couldn't measure, use the average of the ones we could
+        const estimatedBytes = avgBytes * (tabIds.length - measuredCount);
+        return (totalBytes + estimatedBytes) / (1024 * 1024);
+      }
+    } catch {
+      // Scripting API not available — fall through to the rough estimate
+    }
+  }
+
+  // Last resort: just multiply by a fixed number per tab
+  return tabIds.length * MEM_PER_TAB_MB_FALLBACK;
+}
 
 async function loadActivity(): Promise<Map<number, number>> {
   const result = await chrome.storage.session.get(ACTIVITY_KEY);
@@ -64,10 +178,10 @@ async function runSuspensionCheck(): Promise<void> {
 
     const url = tab.url ?? "";
 
-    // Whitelist: never suspend
+    // This tab is on the whitelist — never touch it
     if (url && matchesDomainList(url, settings.whitelist)) continue;
 
-    // Blacklist: always suspend immediately (ignore timeout)
+    // This tab is blacklisted — suspend it right away regardless of how recently it was used
     const forceDiscard = url && matchesDomainList(url, settings.blacklist ?? []);
 
     const lastActive = activity.get(tab.id) ?? tab.lastAccessed ?? 0;
@@ -76,7 +190,7 @@ async function runSuspensionCheck(): Promise<void> {
         await chrome.tabs.discard(tab.id);
         newSuspensions++;
       } catch {
-        // Tab may have been closed or is not discardable — ignore.
+        // Tab was probably closed or already gone — nothing to do
       }
     }
   }
@@ -86,7 +200,11 @@ async function runSuspensionCheck(): Promise<void> {
   }
 }
 
-type LifetimeStats = { totalSuspensions: number; totalPageLoads: number };
+type LifetimeStats = {
+  totalSuspensions: number;
+  totalPageLoads: number;
+  totalBandwidthBytes: number;
+};
 
 async function incrementLifetimeStats(delta: Partial<LifetimeStats>): Promise<void> {
   const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
@@ -95,8 +213,30 @@ async function incrementLifetimeStats(delta: Partial<LifetimeStats>): Promise<vo
     [LIFETIME_STATS_KEY]: {
       totalSuspensions: (prev.totalSuspensions ?? 0) + (delta.totalSuspensions ?? 0),
       totalPageLoads: (prev.totalPageLoads ?? 0) + (delta.totalPageLoads ?? 0),
+      totalBandwidthBytes: (prev.totalBandwidthBytes ?? 0) + (delta.totalBandwidthBytes ?? 0),
     },
   });
+}
+
+// Asks the tab how many bytes it actually downloaded and saves that to our running total.
+// We use the browser's resource timing data, which tracks every request the page made.
+// Cache hits count as 0 bytes, so we don't inflate the numbers with repeated visits.
+async function measureAndRecordBandwidth(tabId: number): Promise<void> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+        return entries.reduce((sum, e) => sum + (e.transferSize ?? 0), 0);
+      },
+    });
+    const bytes = results?.[0]?.result;
+    if (typeof bytes === "number" && bytes > 0) {
+      await incrementLifetimeStats({ totalBandwidthBytes: bytes });
+    }
+  } catch {
+    // Can't inject here (PDF viewer, extension page, etc.) — just skip it
+  }
 }
 
 async function recordActivity(tabId: number): Promise<void> {
@@ -119,14 +259,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabRecord(tabId);
 });
 
-// Track when a tab finishes loading (reset timer + count page load)
+// Whenever a tab finishes loading, reset its idle timer and record the bandwidth it used.
+// We only care about real web pages — not new tabs, about: pages, or extension UIs.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     void recordActivity(tabId);
-    // Only count real navigations (not extension pages, new-tab, etc.)
     const url = tab.url ?? "";
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void incrementLifetimeStats({ totalPageLoads: 1 });
+      void measureAndRecordBandwidth(tabId);
     }
   }
 });
@@ -149,7 +290,8 @@ async function init(): Promise<void> {
   for (const tab of tabs) {
     if (tab.id == null) continue;
     if (!activity.has(tab.id)) {
-      // On fresh browser start with suspendOnStartup: mark all non-active tabs as expired
+      // If the browser just started and suspendOnStartup is on, treat background tabs
+      // as already expired so they get suspended on the first check
       const isActive = tab.active;
       if (isFreshStart && settings.suspendOnStartup && !isActive) {
         activity.set(tab.id, 0);
@@ -160,34 +302,42 @@ async function init(): Promise<void> {
   }
   await saveActivity(activity);
 
-  // If fresh start + suspendOnStartup, run a check immediately
+  // If this is a fresh start with suspendOnStartup enabled, don't wait for the first alarm
   if (isFreshStart && settings.suspendOnStartup && settings.enabled) {
     await runSuspensionCheck();
   }
 
-  // Ensure the periodic alarm is running
+  // Make sure our periodic check alarm is running — create it if it somehow got cleared
   const existing = await chrome.alarms.get(ALARM_NAME);
   if (!existing) {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: CHECK_INTERVAL_MINUTES });
   }
 }
 
-// Handle messages from the popup
+// The popup talks to us through message passing — handle whatever it needs
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "getStats") {
     (async () => {
       const tabs = await chrome.tabs.query({});
-      const suspended = tabs.filter((t) => t.discarded).length;
-      const active = tabs.length - suspended;
+      const suspendedTabs = tabs.filter((t) => t.discarded);
+      const activeTabs = tabs.filter((t) => !t.discarded);
+      const suspended = suspendedTabs.length;
+      const active = activeTabs.length;
       const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
       const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
+
+      const memoryUsedMB = await getTabsMemoryMB(activeTabs);
+      // For saved memory, we use the average cost of an active tab as the estimate per suspended one
+      const avgMemPerTab = active > 0 ? memoryUsedMB / active : MEM_PER_TAB_MB_FALLBACK;
+      const memorySavedMB = suspended * avgMemPerTab;
+
       sendResponse({
         total: tabs.length,
         active,
         suspended,
-        memoryUsedMB: active * MEM_PER_TAB_MB,
-        memorySavedMB: suspended * MEM_PER_TAB_MB,
-        bandwidthUsedMB: (ls.totalPageLoads ?? 0) * BW_PER_SUSPEND_MB,
+        memoryUsedMB,
+        memorySavedMB,
+        bandwidthUsedMB: (ls.totalBandwidthBytes ?? 0) / (1024 * 1024),
         bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
       } satisfies StatsResponse);
     })();
@@ -243,10 +393,11 @@ export type StatsResponse = {
   bandwidthSavedMB: number;
 };
 
-// Keep service worker alive while the popup is open
+// Holding an open port to the popup prevents the service worker from going idle
+// while the user has it open
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "popup") {
-    port.onDisconnect.addListener(() => { /* popup closed */ });
+    port.onDisconnect.addListener(() => { /* popup closed, port released */ });
   }
 });
 
