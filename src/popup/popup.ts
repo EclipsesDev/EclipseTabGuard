@@ -49,7 +49,7 @@ function animateCounter(el: HTMLElement, target: number, duration = 650): void {
 // Format megabytes into a human-readable string
 function formatMB(mb: number): string {
   if (mb >= 1024) return (mb / 1024).toFixed(1) + " GB";
-  return mb + " MB";
+  return mb.toFixed(1) + " MB";
 }
 
 // Stats
