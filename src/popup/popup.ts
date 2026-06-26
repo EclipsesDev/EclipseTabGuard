@@ -132,14 +132,14 @@ blacklistInput.addEventListener("keydown", (e) => {
 });
 
 // Load settings
-chrome.storage.local.get(SETTINGS_KEY, (result) => {
+chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   const s: Settings = { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
   toggleEnabled.checked = s.enabled;
-  togglePinned.checked   = s.skipPinned;
-  toggleAudible.checked  = s.skipAudible;
-  toggleLoading.checked  = s.skipLoading;
-  toggleStartup.checked  = s.suspendOnStartup ?? false;
-  timeoutInput.value     = String(s.timeoutMinutes);
+  togglePinned.checked = s.skipPinned;
+  toggleAudible.checked = s.skipAudible;
+  toggleLoading.checked = s.skipLoading;
+  toggleStartup.checked = s.suspendOnStartup ?? false;
+  timeoutInput.value = String(s.timeoutMinutes);
   whitelist = [...s.whitelist];
   blacklist = [...s.blacklist];
   renderWhitelist();
@@ -150,17 +150,17 @@ chrome.storage.local.get(SETTINGS_KEY, (result) => {
 btnSave.addEventListener("click", () => {
   const timeout = Math.max(1, Math.min(1440, Number(timeoutInput.value) || 30));
   const s: Settings = {
-    enabled:        toggleEnabled.checked,
-    skipPinned:     togglePinned.checked,
-    skipAudible:    toggleAudible.checked,
-    skipLoading:    toggleLoading.checked,
+    enabled: toggleEnabled.checked,
+    skipPinned: togglePinned.checked,
+    skipAudible: toggleAudible.checked,
+    skipLoading: toggleLoading.checked,
     suspendOnStartup: toggleStartup.checked,
-    skipActive:     true,
+    skipActive: true,
     timeoutMinutes: timeout,
     whitelist,
     blacklist,
   };
-  chrome.storage.local.set({ [SETTINGS_KEY]: s }, () => {
+  chrome.storage.sync.set({ [SETTINGS_KEY]: s }, () => {
     toast.classList.add("show");
     setTimeout(() => toast.classList.remove("show"), 2000);
   });

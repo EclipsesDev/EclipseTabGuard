@@ -23,7 +23,7 @@ async function saveActivity(map: Map<number, number>): Promise<void> {
 }
 
 async function loadSettings(): Promise<Settings> {
-  const result = await chrome.storage.local.get(SETTINGS_KEY);
+  const result = await chrome.storage.sync.get(SETTINGS_KEY);
   return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
 }
 
