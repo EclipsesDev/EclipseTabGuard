@@ -107,6 +107,17 @@
     }
     .stat-label { font-size: 10px; color: var(--muted); margin-top: 4px; }
 
+    /* ── Savings row ── */
+    .savings-label {
+      font-size: 10px;
+      color: var(--muted);
+      padding: 0 16px 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .stats-savings { padding-top: 0; }
+    .stat-savings-num { font-size: 16px; }
+
     /* ── Tabs ── */
     .tabs {
       display: flex;
@@ -428,6 +439,32 @@
     <div class="stat">
       <div class="stat-num" id="stat-suspended">0</div>
       <div class="stat-label">Suspended</div>
+    </div>
+  </div>
+
+  <!-- Usage (estimated) -->
+  <div class="savings-label">Estimated Usage</div>
+  <div class="stats stats-savings">
+    <div class="stat">
+      <div class="stat-num stat-savings-num" id="stat-mem-used">— MB</div>
+      <div class="stat-label">Memory Used</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num stat-savings-num" id="stat-bw-used">— MB</div>
+      <div class="stat-label">Bandwidth Used</div>
+    </div>
+  </div>
+
+  <!-- Savings (estimated) -->
+  <div class="savings-label">Estimated Savings</div>
+  <div class="stats stats-savings">
+    <div class="stat">
+      <div class="stat-num stat-savings-num" id="stat-mem-saved">— MB</div>
+      <div class="stat-label">Memory Saved</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num stat-savings-num" id="stat-bw-saved">— MB</div>
+      <div class="stat-label">Bandwidth Saved</div>
     </div>
   </div>
 

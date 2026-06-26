@@ -8,10 +8,16 @@ const SETTINGS_KEY = "settings";
 const statTotal = document.getElementById("stat-total")!;
 const statActive = document.getElementById("stat-active")!;
 const statSuspended = document.getElementById("stat-suspended")!;
-const toggleEnabled = document.getElementById("toggle-enabled")  as HTMLInputElement;
-const togglePinned = document.getElementById("toggle-pinned")   as HTMLInputElement;
-const toggleAudible = document.getElementById("toggle-audible")  as HTMLInputElement;
-const toggleLoading = document.getElementById("toggle-loading")  as HTMLInputElement;const toggleStartup  = document.getElementById("toggle-startup")  as HTMLInputElement;const timeoutInput = document.getElementById("timeout-input")   as HTMLInputElement;
+const statMemSaved = document.getElementById("stat-mem-saved")!;
+const statBwSaved = document.getElementById("stat-bw-saved")!;
+const statMemUsed = document.getElementById("stat-mem-used")!;
+const statBwUsed = document.getElementById("stat-bw-used")!;
+const toggleEnabled = document.getElementById("toggle-enabled") as HTMLInputElement;
+const togglePinned = document.getElementById("toggle-pinned") as HTMLInputElement;
+const toggleAudible = document.getElementById("toggle-audible") as HTMLInputElement;
+const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElement;
+const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
+const timeoutInput = document.getElementById("timeout-input") as HTMLInputElement;
 const whitelistInput = document.getElementById("whitelist-input") as HTMLInputElement;
 const blacklistInput = document.getElementById("blacklist-input") as HTMLInputElement;
 const whitelistListEl = document.getElementById("whitelist-list")!;
@@ -40,6 +46,12 @@ function animateCounter(el: HTMLElement, target: number, duration = 650): void {
   requestAnimationFrame(step);
 }
 
+// Format megabytes into a human-readable string
+function formatMB(mb: number): string {
+  if (mb >= 1024) return (mb / 1024).toFixed(1) + " GB";
+  return mb + " MB";
+}
+
 // Stats
 function refreshStats(): void {
   chrome.runtime.sendMessage({ type: "getStats" }, (resp: StatsResponse | undefined) => {
@@ -47,6 +59,10 @@ function refreshStats(): void {
     animateCounter(statTotal, resp.total);
     animateCounter(statActive, resp.active);
     animateCounter(statSuspended, resp.suspended);
+    statMemSaved.textContent = formatMB(resp.memorySavedMB);
+    statBwSaved.textContent = formatMB(resp.bandwidthSavedMB);
+    statMemUsed.textContent = formatMB(resp.memoryUsedMB);
+    statBwUsed.textContent = formatMB(resp.bandwidthUsedMB);
   });
 }
 

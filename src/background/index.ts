@@ -7,8 +7,13 @@ import { DEFAULT_SETTINGS } from "../types/index.js";
 // Persisted to storage.session so it survives service-worker restarts.
 const ACTIVITY_KEY = "tabActivity";
 const SETTINGS_KEY = "settings";
+const LIFETIME_STATS_KEY = "lifetimeStats";
 const ALARM_NAME = "suspendCheck";
 const CHECK_INTERVAL_MINUTES = 1;
+
+// Estimates used for savings display
+const MEM_PER_TAB_MB = 100; // avg memory a background tab consumes
+const BW_PER_SUSPEND_MB = 2; // avg page weight prevented from reloading
 
 async function loadActivity(): Promise<Map<number, number>> {
   const result = await chrome.storage.session.get(ACTIVITY_KEY);
@@ -49,6 +54,7 @@ async function runSuspensionCheck(): Promise<void> {
     (await chrome.tabs.query({ active: true })).map((t) => t.id)
   );
 
+  let newSuspensions = 0;
   for (const tab of tabs) {
     if (tab.id == null || tab.discarded) continue;
     if (settings.skipPinned && tab.pinned) continue;
@@ -68,11 +74,29 @@ async function runSuspensionCheck(): Promise<void> {
     if (forceDiscard || now - lastActive >= thresholdMs) {
       try {
         await chrome.tabs.discard(tab.id);
+        newSuspensions++;
       } catch {
         // Tab may have been closed or is not discardable — ignore.
       }
     }
   }
+
+  if (newSuspensions > 0) {
+    await incrementLifetimeStats({ totalSuspensions: newSuspensions });
+  }
+}
+
+type LifetimeStats = { totalSuspensions: number; totalPageLoads: number };
+
+async function incrementLifetimeStats(delta: Partial<LifetimeStats>): Promise<void> {
+  const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
+  const prev = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
+  await chrome.storage.local.set({
+    [LIFETIME_STATS_KEY]: {
+      totalSuspensions: (prev.totalSuspensions ?? 0) + (delta.totalSuspensions ?? 0),
+      totalPageLoads: (prev.totalPageLoads ?? 0) + (delta.totalPageLoads ?? 0),
+    },
+  });
 }
 
 async function recordActivity(tabId: number): Promise<void> {
@@ -95,10 +119,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabRecord(tabId);
 });
 
-// Track when a tab finishes loading (new page to reset timer)
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+// Track when a tab finishes loading (reset timer + count page load)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     void recordActivity(tabId);
+    // Only count real navigations (not extension pages, new-tab, etc.)
+    const url = tab.url ?? "";
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      void incrementLifetimeStats({ totalPageLoads: 1 });
+    }
   }
 });
 
@@ -150,7 +179,17 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const tabs = await chrome.tabs.query({});
       const suspended = tabs.filter((t) => t.discarded).length;
       const active = tabs.length - suspended;
-      sendResponse({ total: tabs.length, active, suspended } satisfies StatsResponse);
+      const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
+      const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
+      sendResponse({
+        total: tabs.length,
+        active,
+        suspended,
+        memoryUsedMB: active * MEM_PER_TAB_MB,
+        memorySavedMB: suspended * MEM_PER_TAB_MB,
+        bandwidthUsedMB: (ls.totalPageLoads ?? 0) * BW_PER_SUSPEND_MB,
+        bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
+      } satisfies StatsResponse);
     })();
     return true;
   }
@@ -194,7 +233,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
-export type StatsResponse = { total: number; active: number; suspended: number };
+export type StatsResponse = {
+  total: number;
+  active: number;
+  suspended: number;
+  memoryUsedMB: number;
+  memorySavedMB: number;
+  bandwidthUsedMB: number;
+  bandwidthSavedMB: number;
+};
 
 // Keep service worker alive while the popup is open
 chrome.runtime.onConnect.addListener((port) => {
