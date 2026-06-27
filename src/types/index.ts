@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   skipPinned: false,
   skipAudible: true,
   skipActive: true,
-  skipLoading: true,
+  skipLoading: false,
   suspendOnStartup: true,
   whitelist: [],
   blacklist: [],
