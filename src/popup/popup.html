@@ -20,7 +20,7 @@
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 320px;
+      width: 380px;
       background: var(--bg);
       color: var(--text);
       font: 13px system-ui, sans-serif;
@@ -458,6 +458,35 @@
     .badge-active   { background: rgba(124,58,237,0.2); color: var(--accent-light); }
     .badge-suspended { background: rgba(100,100,140,0.2); color: #666; }
     .badge-pinned   { background: rgba(251,191,36,0.15); color: #fbbf24; }
+
+    /* Tab action buttons (shown on hover) */
+    .tab-badge        { transition: opacity 0.12s var(--ease); }
+    .tab-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s var(--ease);
+    }
+    .tab-item:hover .tab-badge   { opacity: 0; pointer-events: none; }
+    .tab-item:hover .tab-actions { opacity: 1; pointer-events: auto; }
+    .tab-action-btn {
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: filter 0.12s, transform 0.1s var(--ease);
+      border: none;
+    }
+    .tab-action-btn:active { transform: scale(0.92); }
+    .tab-action-btn:hover  { filter: brightness(1.2); }
+    .tab-action-goto    { background: var(--accent); color: #fff; }
+    .tab-action-suspend { background: var(--surface2); color: #888; border: 1px solid #333350 !important; }
+    .tab-action-resume  { background: rgba(134,239,172,0.12); color: var(--success); border: 1px solid rgba(134,239,172,0.22) !important; }
 
     /* ── Actions ── */
     .actions {

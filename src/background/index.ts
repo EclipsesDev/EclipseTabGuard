@@ -13,7 +13,7 @@ const CHECK_INTERVAL_MINUTES = 1;
 const CACHE_WARM_ALARM = "cacheWarm";
 
 // Used when we can't get real memory data (e.g. Firefox without COOP/COEP pages)
-const MEM_PER_TAB_MB_FALLBACK = 100;
+const MEM_PER_TAB_MB_FALLBACK = 70;
 // Best-guess for how much data a suspended tab would have consumed if left running
 const BW_PER_SUSPEND_MB = 2;
 
@@ -34,8 +34,7 @@ interface ChromeProcesses {
 // This runs inside the tab itself to get its memory footprint.
 // Returns bytes if the browser supports it, null if there's nothing we can do.
 async function measureTabMemory(): Promise<number | null> {
-  // The modern way — gives accurate per-page memory, but only works if the
-  // page has COOP + COEP headers set (most sites don't bother)
+  // The only accurate per-page method — requires COOP + COEP headers (most sites don't set them)
   if (typeof (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory === "function") {
     try {
       const r = await (performance as Performance & { measureUserAgentSpecificMemory: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory();
@@ -44,18 +43,18 @@ async function measureTabMemory(): Promise<number | null> {
       // Page isn't cross-origin isolated, so this API throws — move on
     }
   }
-  // Older Chrome-only shortcut — shared across all tabs in the same process,
-  // so it can overcount when multiple tabs run in one renderer
-  const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
-  if (mem) return mem.usedJSHeapSize;
+  // NOTE: performance.memory.usedJSHeapSize is intentionally NOT used here.
+  // It reports the entire V8 renderer-process heap (~100 MB baseline), not the
+  // individual tab's footprint, so it gives wildly misleading per-tab numbers.
   return null;
 }
 
 // Figures out how much RAM the given tabs are currently using.
 // Tries the most accurate method first and falls back if something isn't available.
-async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<number> {
+// Returns the MB value plus a flag indicating whether it is a rough estimate.
+async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<{ mb: number; estimated: boolean }> {
   const tabIds = tabs.map((t) => t.id).filter((id): id is number => id != null);
-  if (tabIds.length === 0) return 0;
+  if (tabIds.length === 0) return { mb: 0, estimated: false };
 
   // Best option: Chrome's built-in process API gives us real private memory per process
   const procs: ChromeProcesses | undefined =
@@ -79,7 +78,7 @@ async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<number> {
           (sum, p) => sum + (p.privateMemory ?? 0),
           0
         );
-        return totalBytes / (1024 * 1024);
+        return { mb: totalBytes / (1024 * 1024), estimated: false };
       }
     } catch {
       // Something went wrong with the processes API — try the next method
@@ -119,15 +118,17 @@ async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<number> {
         const avgBytes = totalBytes / measuredCount;
         // For tabs we couldn't measure, use the average of the ones we could
         const estimatedBytes = avgBytes * (tabIds.length - measuredCount);
-        return (totalBytes + estimatedBytes) / (1024 * 1024);
+        // Fully measured only if every tab returned a real value
+        const estimated = measuredCount < tabIds.length;
+        return { mb: (totalBytes + estimatedBytes) / (1024 * 1024), estimated };
       }
     } catch {
       // Scripting API not available — fall through to the rough estimate
     }
   }
 
-  // Last resort: just multiply by a fixed number per tab
-  return tabIds.length * MEM_PER_TAB_MB_FALLBACK;
+  // Last resort: just multiply by a fixed per-tab estimate
+  return { mb: tabIds.length * MEM_PER_TAB_MB_FALLBACK, estimated: true };
 }
 
 async function loadActivity(): Promise<Map<number, number>> {
@@ -371,7 +372,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
       const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
 
-      const memoryUsedMB = await getTabsMemoryMB(activeTabs);
+      const { mb: memoryUsedMB, estimated: memoryIsEstimated } = await getTabsMemoryMB(activeTabs);
       // For saved memory, we use the average cost of an active tab as the estimate per suspended one
       const avgMemPerTab = active > 0 ? memoryUsedMB / active : MEM_PER_TAB_MB_FALLBACK;
       const memorySavedMB = suspended * avgMemPerTab;
@@ -382,6 +383,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         suspended,
         memoryUsedMB,
         memorySavedMB,
+        memoryIsEstimated,
         bandwidthUsedMB: (ls.totalBandwidthBytes ?? 0) / (1024 * 1024),
         bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
       } satisfies StatsResponse);
@@ -434,6 +436,8 @@ export type StatsResponse = {
   suspended: number;
   memoryUsedMB: number;
   memorySavedMB: number;
+  /** True when the value is a rough per-tab estimate rather than a real measurement */
+  memoryIsEstimated: boolean;
   bandwidthUsedMB: number;
   bandwidthSavedMB: number;
 };

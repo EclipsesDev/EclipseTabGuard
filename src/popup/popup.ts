@@ -61,9 +61,10 @@ function refreshStats(): void {
     animateCounter(statTotal, resp.total);
     animateCounter(statActive, resp.active);
     animateCounter(statSuspended, resp.suspended);
-    statMemSaved.textContent = formatMB(resp.memorySavedMB);
+    const memPrefix = resp.memoryIsEstimated ? "~" : "";
+    statMemUsed.textContent = memPrefix + formatMB(resp.memoryUsedMB);
+    statMemSaved.textContent = memPrefix + formatMB(resp.memorySavedMB);
     statBwSaved.textContent = formatMB(resp.bandwidthSavedMB);
-    statMemUsed.textContent = formatMB(resp.memoryUsedMB);
     statBwUsed.textContent = formatMB(resp.bandwidthUsedMB);
   });
 }
@@ -246,10 +247,46 @@ function renderTabList(tabs: TabInfo[]): void {
     badge.textContent = tab.pinned ? "Pinned" : tab.discarded ? "Suspended" : "Active";
     li.appendChild(badge);
 
+    // Action buttons (revealed on hover)
+    const actions = document.createElement("div");
+    actions.className = "tab-actions";
+
+    const gotoBtn = document.createElement("button");
+    gotoBtn.className = "tab-action-btn tab-action-goto";
+    gotoBtn.textContent = tab.discarded ? "Resume" : "Go to";
+    gotoBtn.title = tab.discarded ? "Resume this tab" : "Switch to this tab";
+    gotoBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      chrome.runtime.sendMessage({ type: "focusTab", tabId: tab.id, windowId: tab.windowId }, () => {
+        void chrome.runtime.lastError;
+      });
+      window.close();
+    });
+    actions.appendChild(gotoBtn);
+
+    if (!tab.discarded) {
+      const suspendBtn = document.createElement("button");
+      suspendBtn.className = "tab-action-btn tab-action-suspend";
+      suspendBtn.textContent = "Suspend";
+      suspendBtn.title = "Suspend this tab now";
+      suspendBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        chrome.tabs.discard(tab.id, () => {
+          void chrome.runtime.lastError;
+          refreshTabList();
+          refreshStats();
+        });
+      });
+      actions.appendChild(suspendBtn);
+    }
+
+    li.appendChild(actions);
+
     li.addEventListener("click", () => {
       chrome.runtime.sendMessage({ type: "focusTab", tabId: tab.id, windowId: tab.windowId }, () => {
         void chrome.runtime.lastError;
       });
+      window.close();
     });
 
     listEl.appendChild(li);
