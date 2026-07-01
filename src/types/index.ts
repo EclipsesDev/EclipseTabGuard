@@ -12,7 +12,9 @@ export type Settings = {
   skipLoading: boolean;
   /** Suspend all background tabs immediately when the browser starts */
   suspendOnStartup: boolean;
-  /** Domain patterns to never suspend */
+  /** Periodically pre-fetch suspended tab URLs to warm the HTTP cache (BETA) */
+  cacheWarm: boolean;  /** How often (in minutes) cache warming runs. Default: 10 */
+  cacheWarmIntervalMinutes: number;  /** Domain patterns to never suspend */
   whitelist: string[];
   /** Domain patterns to always suspend immediately (ignores timeout) */
   blacklist: string[];
@@ -42,6 +44,8 @@ export const DEFAULT_SETTINGS: Settings = {
   skipActive: true,
   skipLoading: false,
   suspendOnStartup: true,
+  cacheWarm: false,
+  cacheWarmIntervalMinutes: 10,
   whitelist: [],
   blacklist: [],
 };

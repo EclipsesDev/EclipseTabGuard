@@ -17,6 +17,8 @@ const togglePinned = document.getElementById("toggle-pinned") as HTMLInputElemen
 const toggleAudible = document.getElementById("toggle-audible") as HTMLInputElement;
 const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElement;
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
+const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
+const cacheWarmIntervalInput = document.getElementById("cache-warm-interval-input") as HTMLInputElement;
 const timeoutInput = document.getElementById("timeout-input") as HTMLInputElement;
 const whitelistInput = document.getElementById("whitelist-input") as HTMLInputElement;
 const blacklistInput = document.getElementById("blacklist-input") as HTMLInputElement;
@@ -90,6 +92,15 @@ function attachRipple(el: HTMLElement): void {
 }
 [btnSave, btnSuspendNow].forEach(attachRipple);
 
+// Cache warming sub-settings chevron
+const cacheWarmChevron = document.getElementById("cache-warm-chevron") as HTMLButtonElement;
+const cacheWarmSub = document.getElementById("cache-warm-sub") as HTMLDivElement;
+cacheWarmChevron.addEventListener("click", () => {
+  const open = cacheWarmSub.classList.toggle("open");
+  cacheWarmChevron.classList.toggle("open", open);
+  cacheWarmChevron.setAttribute("aria-expanded", String(open));
+});
+
 // Domain list rendering
 function renderDomainList(
   items: string[],
@@ -155,6 +166,8 @@ chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   toggleAudible.checked = s.skipAudible;
   toggleLoading.checked = s.skipLoading;
   toggleStartup.checked = s.suspendOnStartup ?? false;
+  toggleCacheWarm.checked = s.cacheWarm ?? false;
+  cacheWarmIntervalInput.value = String(s.cacheWarmIntervalMinutes ?? 10);
   timeoutInput.value = String(s.timeoutMinutes);
   whitelist = [...s.whitelist];
   blacklist = [...s.blacklist];
@@ -171,6 +184,8 @@ btnSave.addEventListener("click", () => {
     skipAudible: toggleAudible.checked,
     skipLoading: toggleLoading.checked,
     suspendOnStartup: toggleStartup.checked,
+    cacheWarm: toggleCacheWarm.checked,
+    cacheWarmIntervalMinutes: Math.max(1, Math.min(120, Number(cacheWarmIntervalInput.value) || 10)),
     skipActive: true,
     timeoutMinutes: timeout,
     whitelist,

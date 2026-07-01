@@ -14,6 +14,7 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 - **Tab browser** — view all open tabs with their status (Active / Suspended / Pinned) and click to focus any tab
 - **Suspend on startup** — optionally suspend all background tabs the moment the browser opens
 - **Suspend Now** — manually trigger suspension of all eligible tabs instantly
+- **Cache warming** *(beta)* — periodically re-fetches suspended tab URLs in the background to keep them fresh in the HTTP cache, so they load faster when clicked
 
 ## Smart skip rules
 
@@ -23,12 +24,14 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 | Skip pinned tabs | off |
 | Skip tabs playing audio | on |
 | Skip tabs still loading | on |
-| Suspend on startup | true |
+| Suspend on startup | on |
 | Inactivity timeout | 3 minutes |
+| Cache warming | off |
+| Cache warm interval | 10 minutes |
 
 ## Storage
 
-- **Settings** — saved to `chrome.storage.local` (persistent, local-only, 5 MB limit)
+- **Settings** — saved to `chrome.storage.sync` (synced across devices, 100 KB limit)
 - **Tab activity timestamps** — saved to `chrome.storage.session` (in-memory, cleared on browser close)
 
 ## Development

@@ -162,6 +162,105 @@
     }
     .row:last-of-type { border-bottom: none; }
     .row-label { font-size: 12px; color: #c0c0d8; }
+    .tag-beta {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 20px;
+      background: rgba(251,191,36,0.13);
+      color: #fbbf24;
+      border: 1px solid rgba(251,191,36,0.25);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      vertical-align: middle;
+      margin-left: 5px;
+    }
+    .tip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      background: #232340;
+      color: #555;
+      font-size: 9px;
+      font-weight: 700;
+      cursor: help;
+      margin-left: 5px;
+      vertical-align: middle;
+      border: 1px solid #3a3a55;
+      position: relative;
+      flex-shrink: 0;
+      padding-bottom: 1px;
+      transition: color 0.15s var(--ease), border-color 0.15s var(--ease);
+      user-select: none;
+    }
+    .tip:hover { color: var(--accent-light); border-color: var(--accent); }
+    .tip::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: calc(100% + 7px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #13132a;
+      border: 1px solid #2e2e50;
+      color: #c0c0d8;
+      font-size: 11px;
+      font-weight: 400;
+      padding: 7px 10px;
+      border-radius: 7px;
+      white-space: normal;
+      width: 190px;
+      text-align: left;
+      line-height: 1.45;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s var(--ease);
+      z-index: 20;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+    }
+    .tip:hover::after { opacity: 1; }
+
+    /* ── Chevron + collapsible sub-field ── */
+    .row-end {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .chevron {
+      background: #1e1e35;
+      border: 1px solid #3a3a55;
+      color: #888;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      width: 18px; height: 18px;
+      border-radius: 5px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 0;
+      flex-shrink: 0;
+      position: relative;
+      top: -1px;
+      margin-right: 5px;
+      vertical-align: middle;
+      transition: color 0.15s var(--ease), border-color 0.15s var(--ease), background 0.15s var(--ease), transform 0.2s var(--ease);
+    }
+    .chevron:hover { color: var(--accent-light); border-color: var(--accent); background: #252545; }
+    .chevron.open { transform: rotate(90deg); color: var(--accent-light); border-color: var(--accent); background: #252545; }
+    .sub-field {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height 0.22s var(--ease), opacity 0.18s var(--ease);
+      padding-left: 10px;
+      border-left: 2px solid #232340;
+      margin-left: 4px;
+    }
+    .sub-field.open { max-height: 50px; opacity: 1; overflow: visible; }
 
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -482,23 +581,34 @@
     <!-- Settings -->
     <div class="panel active" id="panel-settings">
       <div class="row">
-        <span class="row-label">Skip pinned tabs</span>
+        <span class="row-label">Skip pinned tabs<span class="tip" data-tip="Pinned tabs will never be suspended, regardless of how long they&#39;ve been inactive.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-pinned"><span class="slider"></span></label>
       </div>
       <div class="row">
-        <span class="row-label">Skip audible tabs</span>
+        <span class="row-label">Skip audible tabs<span class="tip" data-tip="Tabs currently playing audio or video will not be suspended while sound is active.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-audible"><span class="slider"></span></label>
       </div>
       <div class="row">
-        <span class="row-label">Skip loading tabs</span>
+        <span class="row-label">Skip loading tabs<span class="tip" data-tip="Tabs that are still loading will be left alone until they finish loading.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-loading"><span class="slider"></span></label>
       </div>
       <div class="row">
-        <span class="row-label">Suspend all tabs on startup</span>
+        <span class="row-label">Suspend on startup<span class="tip" data-tip="When the browser launches, all background tabs are immediately suspended to free up memory right away.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
       </div>
+      <div class="row">
+        <span class="row-label"><button class="chevron" id="cache-warm-chevron" title="Configure interval" aria-expanded="false">&#8250;</button> Cache warming<span class="tag-beta">BETA</span><span class="tip" data-tip="Silently re-fetches suspended tab URLs on a schedule to keep them fresh in the browser&#39;s HTTP cache, making them load faster when clicked.">?</span></span>
+        <label class="toggle"><input type="checkbox" id="toggle-cache-warm"><span class="slider"></span></label>
+      </div>
+      <div class="sub-field" id="cache-warm-sub">
+        <div class="field">
+          <span class="field-label">Re-fetch every<span class="tip" data-tip="How often cache warming runs. Lower values keep tabs fresher but use more background bandwidth.">?</span></span>
+          <input type="number" id="cache-warm-interval-input" min="1" max="120" value="10">
+          <span class="field-unit">min</span>
+        </div>
+      </div>
       <div class="field">
-        <span class="field-label">Suspend after</span>
+        <span class="field-label">Suspend after<span class="tip" data-tip="A tab inactive for this many minutes will be automatically suspended to free memory.">?</span></span>
         <input type="number" id="timeout-input" min="1" max="1440" value="30">
         <span class="field-unit">min</span>
       </div>

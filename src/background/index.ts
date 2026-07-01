@@ -10,6 +10,7 @@ const SETTINGS_KEY = "settings";
 const LIFETIME_STATS_KEY = "lifetimeStats";
 const ALARM_NAME = "suspendCheck";
 const CHECK_INTERVAL_MINUTES = 1;
+const CACHE_WARM_ALARM = "cacheWarm";
 
 // Used when we can't get real memory data (e.g. Firefox without COOP/COEP pages)
 const MEM_PER_TAB_MB_FALLBACK = 100;
@@ -272,9 +273,49 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
+// Periodically fetch the URLs of suspended tabs so their content is fresh in the
+// browser's HTTP cache. When the user clicks one, DNS/TCP/TLS are already warm
+// and the HTML document may already be cached, cutting load time noticeably.
+async function runCacheWarm(): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.enabled || !settings.cacheWarm) return;
+
+  const tabs = await chrome.tabs.query({ discarded: true });
+  const activity = await loadActivity();
+
+  // Pick up to 5 suspended tabs, prioritising the most recently used ones
+  const candidates = tabs
+    .filter(t => { const u = t.url ?? ""; return u.startsWith("https://") || u.startsWith("http://"); })
+    .sort((a, b) => {
+      const aLast = a.id != null ? (activity.get(a.id) ?? 0) : 0;
+      const bLast = b.id != null ? (activity.get(b.id) ?? 0) : 0;
+      return bLast - aLast;
+    })
+    .slice(0, 5);
+
+  await Promise.allSettled(
+    candidates.map(async tab => {
+      const url = tab.url!;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10_000);
+        const r = await fetch(url, { cache: "default", signal: controller.signal });
+        clearTimeout(timer);
+        // Consuming the body stores it in the HTTP cache for the next navigation
+        if (r.ok) await r.blob();
+      } catch {
+        // Network error, timeout, or blocked — skip silently
+      }
+    })
+  );
+}
+
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
     void runSuspensionCheck();
+  }
+  if (alarm.name === CACHE_WARM_ALARM) {
+    void runCacheWarm();
   }
 });
 
@@ -312,6 +353,10 @@ async function init(): Promise<void> {
   if (!existing) {
     chrome.alarms.create(ALARM_NAME, { periodInMinutes: CHECK_INTERVAL_MINUTES });
   }
+
+  // Always recreate the warm alarm so its period reflects the current setting
+  await chrome.alarms.clear(CACHE_WARM_ALARM);
+  chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: settings.cacheWarmIntervalMinutes });
 }
 
 // The popup talks to us through message passing — handle whatever it needs
@@ -392,6 +437,14 @@ export type StatsResponse = {
   bandwidthUsedMB: number;
   bandwidthSavedMB: number;
 };
+
+// When the user saves settings, recreate the cache-warm alarm with the updated interval
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes[SETTINGS_KEY]) {
+    const updated = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue as Partial<Settings>) };
+    void chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: updated.cacheWarmIntervalMinutes });
+  }
+});
 
 // Holding an open port to the popup prevents the service worker from going idle
 // while the user has it open
