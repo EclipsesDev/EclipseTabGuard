@@ -157,7 +157,7 @@ function matchesDomainList(url: string, patterns: string[]): boolean {
   }
 }
 
-async function runSuspensionCheck(): Promise<void> {
+async function runSuspensionCheck(force = false): Promise<void> {
   const settings = await loadSettings();
   if (!settings.enabled) return;
 
@@ -187,7 +187,7 @@ async function runSuspensionCheck(): Promise<void> {
     const forceDiscard = url && matchesDomainList(url, settings.blacklist ?? []);
 
     const lastActive = activity.get(tab.id) ?? tab.lastAccessed ?? 0;
-    if (forceDiscard || now - lastActive >= thresholdMs) {
+    if (forceDiscard || force || now - lastActive >= thresholdMs) {
       try {
         await chrome.tabs.discard(tab.id);
         newSuspensions++;
@@ -241,6 +241,47 @@ async function measureAndRecordBandwidth(tabId: number): Promise<void> {
   }
 }
 
+// Closes any tabs that share the same URL as an existing tab, keeping the leftmost one.
+async function closeDuplicateTabs(): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.enabled || !settings.closeDuplicates) return;
+
+  const tabs = await chrome.tabs.query({});
+  // Sort by index ascending so the leftmost tab is always encountered first
+  const sorted = [...tabs].sort((a, b) => a.index - b.index);
+
+  const seen = new Map<string, number>(); // normalized URL to tab id
+  const toClose: number[] = [];
+
+  for (const tab of sorted) {
+    const url = tab.url ?? "";
+    if (!url || url.startsWith("chrome:") 
+      || url.startsWith("about:") 
+      || url.startsWith("chrome-extension:") 
+      || url.startsWith("moz-extension:")) continue;
+
+    // Normalize: strip hash so #section differences don't count as separate pages
+    let normalized: string;
+    try {
+      const u = new URL(url);
+      u.hash = "";
+      normalized = u.toString().replace(/\/$/, "");
+    } catch {
+      normalized = url;
+    }
+
+    if (seen.has(normalized)) {
+      if (tab.id != null) toClose.push(tab.id);
+    } else {
+      if (tab.id != null) seen.set(normalized, tab.id);
+    }
+  }
+
+  for (const tabId of toClose) {
+    try { await chrome.tabs.remove(tabId); } catch { /* already closed */ }
+  }
+}
+
 async function recordActivity(tabId: number): Promise<void> {
   const activity = await loadActivity();
   activity.set(tabId, Date.now());
@@ -271,7 +312,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       void incrementLifetimeStats({ totalPageLoads: 1 });
       void measureAndRecordBandwidth(tabId);
     }
+    void closeDuplicateTabs();
   }
+});
+
+chrome.tabs.onCreated.addListener(() => {
+  void closeDuplicateTabs();
 });
 
 // Periodically fetch the URLs of suspended tabs so their content is fresh in the
@@ -392,7 +438,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "suspendNow") {
-    runSuspensionCheck().then(() => sendResponse({ ok: true }));
+    runSuspensionCheck(true).then(() => sendResponse({ ok: true }));
     return true;
   }
 

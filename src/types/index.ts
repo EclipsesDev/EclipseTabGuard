@@ -18,6 +18,8 @@ export type Settings = {
   whitelist: string[];
   /** Domain patterns to always suspend immediately (ignores timeout) */
   blacklist: string[];
+  /** Automatically close duplicate tabs, keeping the leftmost one */
+  closeDuplicates: boolean;
 };
 
 export type TabRecord = {
@@ -46,6 +48,7 @@ export const DEFAULT_SETTINGS: Settings = {
   suspendOnStartup: true,
   cacheWarm: false,
   cacheWarmIntervalMinutes: 10,
+  closeDuplicates: false,
   whitelist: [],
   blacklist: [],
 };

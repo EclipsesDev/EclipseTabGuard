@@ -18,6 +18,7 @@ const toggleAudible = document.getElementById("toggle-audible") as HTMLInputElem
 const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElement;
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
 const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
+const toggleCloseDuplicates = document.getElementById("toggle-close-duplicates") as HTMLInputElement;
 const cacheWarmIntervalInput = document.getElementById("cache-warm-interval-input") as HTMLInputElement;
 const timeoutInput = document.getElementById("timeout-input") as HTMLInputElement;
 const whitelistInput = document.getElementById("whitelist-input") as HTMLInputElement;
@@ -168,6 +169,7 @@ chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   toggleLoading.checked = s.skipLoading;
   toggleStartup.checked = s.suspendOnStartup ?? false;
   toggleCacheWarm.checked = s.cacheWarm ?? false;
+  toggleCloseDuplicates.checked = s.closeDuplicates ?? false;
   cacheWarmIntervalInput.value = String(s.cacheWarmIntervalMinutes ?? 10);
   timeoutInput.value = String(s.timeoutMinutes);
   whitelist = [...s.whitelist];
@@ -186,6 +188,7 @@ btnSave.addEventListener("click", () => {
     skipLoading: toggleLoading.checked,
     suspendOnStartup: toggleStartup.checked,
     cacheWarm: toggleCacheWarm.checked,
+    closeDuplicates: toggleCloseDuplicates.checked,
     cacheWarmIntervalMinutes: Math.max(1, Math.min(120, Number(cacheWarmIntervalInput.value) || 10)),
     skipActive: true,
     timeoutMinutes: timeout,

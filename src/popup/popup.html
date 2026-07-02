@@ -418,6 +418,7 @@
       transition: background 0.15s var(--ease);
       animation: slideIn 0.15s var(--ease);
       margin-bottom: 2px;
+      position: relative;
     }
     .tab-item:hover { background: var(--surface2); }
     .tab-favicon {
@@ -465,7 +466,10 @@
       display: flex;
       align-items: center;
       gap: 4px;
-      flex-shrink: 0;
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.12s var(--ease);
@@ -624,6 +628,10 @@
       <div class="row">
         <span class="row-label">Suspend on startup<span class="tip" data-tip="When the browser launches, all background tabs are immediately suspended to free up memory right away.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
+      </div>
+      <div class="row">
+        <span class="row-label">Close duplicate tabs<span class="tag-beta">BETA</span><span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed. The leftmost tab is always kept.">?</span></span>
+        <label class="toggle"><input type="checkbox" id="toggle-close-duplicates"><span class="slider"></span></label>
       </div>
       <div class="row">
         <span class="row-label"><button class="chevron" id="cache-warm-chevron" title="Configure interval" aria-expanded="false">&#8250;</button> Cache warming<span class="tag-beta">BETA</span><span class="tip" data-tip="Silently re-fetches suspended tab URLs on a schedule to keep them fresh in the browser&#39;s HTTP cache, making them load faster when clicked.">?</span></span>
