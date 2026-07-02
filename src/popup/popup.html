@@ -219,6 +219,28 @@
       z-index: 20;
       box-shadow: 0 4px 16px rgba(0,0,0,0.45);
     }
+    .no-css-tooltips .tip::after { display: none !important; }
+
+    /* JS-rendered tooltip (stays within popup bounds) */
+    .js-tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: #13132a;
+      border: 1px solid #2e2e50;
+      color: #c0c0d8;
+      font-size: 11px;
+      font-weight: 400;
+      padding: 7px 10px;
+      border-radius: 7px;
+      line-height: 1.45;
+      white-space: normal;
+      max-width: 240px;
+      text-align: left;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.12s ease, transform 0.12s ease;
+    }
     .tip:hover::after { opacity: 1; }
 
     /* ── Chevron + collapsible sub-field ── */
@@ -260,7 +282,7 @@
       border-left: 2px solid #232340;
       margin-left: 4px;
     }
-    .sub-field.open { max-height: 50px; opacity: 1; overflow: visible; }
+    .sub-field.open { max-height: 140px; opacity: 1; overflow: visible; margin-bottom: 8px; }
 
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -305,6 +327,15 @@
       text-align: right;
       outline: none;
       transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    }
+    .select {
+      padding: 6px 8px;
+      background: var(--surface);
+      border: 1px solid #2e2e4a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
     }
     .field input[type="number"]:focus {
       border-color: var(--accent);
@@ -630,8 +661,25 @@
         <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
       </div>
       <div class="row">
-        <span class="row-label">Close duplicate tabs<span class="tag-beta">BETA</span><span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed. The leftmost tab is always kept.">?</span></span>
+        <span class="row-label"><button class="chevron" id="close-duplicates-chevron" title="Options" aria-expanded="false">&#8250;</button> Close duplicate tabs<span class="tag-beta">BETA</span><span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-close-duplicates"><span class="slider"></span></label>
+      </div>
+      <div class="sub-field" id="close-duplicates-sub">
+        <div class="field">
+          <span class="field-label">Mode<span class="tip" data-tip="Keep latest: preserve the most recently used or created tab, Keep leftmost: preserve the smallest index tab">?</span></span>
+          <select id="close-duplicates-mode" class="select">
+            <option value="1">Keep leftmost</option>
+            <option value="2">Keep latest</option>
+          </select>
+        </div>
+        <div class="field" style="padding-top:8px;">
+          <span class="field-label">Re-scan on enable<span class="tip" data-tip="Runs a one-time re-scan when duplicate-closing is turned back on to remove duplicates created while it was disabled.">?</span></span>
+          <label class="toggle"><input id="close-duplicates-keep-checking" type="checkbox"><span class="slider"></span></label>
+        </div>
+        <div class="field" style="padding-top:8px;">
+          <span class="field-label">Re-scan on startup<span class="tip" data-tip="Run a re-scan when the extension starts to remove duplicates already open at startup.">?</span></span>
+          <label class="toggle"><input id="close-duplicates-rescan-startup" type="checkbox"><span class="slider"></span></label>
+        </div>
       </div>
       <div class="row">
         <span class="row-label"><button class="chevron" id="cache-warm-chevron" title="Configure interval" aria-expanded="false">&#8250;</button> Cache warming<span class="tag-beta">BETA</span><span class="tip" data-tip="Silently re-fetches suspended tab URLs on a schedule to keep them fresh in the browser&#39;s HTTP cache, making them load faster when clicked.">?</span></span>
@@ -683,6 +731,7 @@
   <div class="actions">
     <button class="btn btn-primary" id="btn-save">Save</button>
     <button class="btn btn-secondary" id="btn-suspend-now">Suspend Now</button>
+    <!-- Capture Preview removed -->
   </div>
 
   <div class="toast" id="toast">Settings saved!</div>

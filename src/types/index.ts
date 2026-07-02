@@ -20,6 +20,12 @@ export type Settings = {
   blacklist: string[];
   /** Automatically close duplicate tabs, keeping the leftmost one */
   closeDuplicates: boolean;
+  /** Duplicate-closing mode: 1 = keep leftmost, 2 = keep latest (most recently used/created) */
+  closeDuplicatesMode: 1 | 2;
+  /** When true, re-scan existing tabs when duplicate-closing is re-enabled so newly-created duplicates while disabled get cleaned up */
+  closeDuplicatesKeepChecking: boolean;
+  /** When true, run a duplicate re-scan on extension startup */
+  closeDuplicatesRescanOnStartup: boolean;
 };
 
 export type TabRecord = {
@@ -49,6 +55,9 @@ export const DEFAULT_SETTINGS: Settings = {
   cacheWarm: false,
   cacheWarmIntervalMinutes: 10,
   closeDuplicates: false,
+  closeDuplicatesMode: 2,
+  closeDuplicatesKeepChecking: true,
+  closeDuplicatesRescanOnStartup: true,
   whitelist: [],
   blacklist: [],
 };

@@ -19,6 +19,11 @@ const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElem
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
 const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
 const toggleCloseDuplicates = document.getElementById("toggle-close-duplicates") as HTMLInputElement;
+const closeDuplicatesMode = document.getElementById("close-duplicates-mode") as HTMLSelectElement | null;
+const closeDuplicatesKeepChecking = document.getElementById("close-duplicates-keep-checking") as HTMLInputElement | null;
+const closeDuplicatesSub = document.getElementById("close-duplicates-sub") as HTMLDivElement | null;
+const closeDuplicatesRescanStartup = document.getElementById("close-duplicates-rescan-startup") as HTMLInputElement | null;
+const closeDuplicatesChevron = document.getElementById("close-duplicates-chevron") as HTMLButtonElement | null;
 const cacheWarmIntervalInput = document.getElementById("cache-warm-interval-input") as HTMLInputElement;
 const timeoutInput = document.getElementById("timeout-input") as HTMLInputElement;
 const whitelistInput = document.getElementById("whitelist-input") as HTMLInputElement;
@@ -33,6 +38,7 @@ const toast = document.getElementById("toast")!;
 
 let whitelist: string[] = [];
 let blacklist: string[] = [];
+
 
 // Animated counter (slot-roll effect)
 function animateCounter(el: HTMLElement, target: number, duration = 650): void {
@@ -170,12 +176,77 @@ chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   toggleStartup.checked = s.suspendOnStartup ?? false;
   toggleCacheWarm.checked = s.cacheWarm ?? false;
   toggleCloseDuplicates.checked = s.closeDuplicates ?? false;
+  if (closeDuplicatesMode && s.closeDuplicatesMode) closeDuplicatesMode.value = String(s.closeDuplicatesMode);
+  if (closeDuplicatesKeepChecking) closeDuplicatesKeepChecking.checked = s.closeDuplicatesKeepChecking ?? true;
+  if (closeDuplicatesRescanStartup) closeDuplicatesRescanStartup.checked = s.closeDuplicatesRescanOnStartup ?? false;
   cacheWarmIntervalInput.value = String(s.cacheWarmIntervalMinutes ?? 10);
   timeoutInput.value = String(s.timeoutMinutes);
   whitelist = [...s.whitelist];
   blacklist = [...s.blacklist];
   renderWhitelist();
   renderBlacklist();
+});
+
+// JS tooltip: replace CSS pseudo-tooltips so they stay inside the popup bounds
+document.documentElement.classList.add('no-css-tooltips');
+const jsTip = document.createElement('div');
+jsTip.className = 'js-tooltip';
+jsTip.style.display = 'none';
+document.body.appendChild(jsTip);
+let hideTimer: number | null = null;
+function showJsTip(target: HTMLElement) {
+  const text = target.getAttribute('data-tip');
+  if (!text) return;
+  if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+  jsTip.textContent = text;
+  jsTip.style.display = 'block';
+  jsTip.style.visibility = 'hidden';
+  jsTip.style.opacity = '0';
+  // ensure layout/transitions settle first, then measure & position
+  jsTip.style.left = '0px';
+  jsTip.style.top = '0px';
+  requestAnimationFrame(() => {
+    const pad = 8;
+    const targ = target.getBoundingClientRect();
+    // measure tooltip size after layout has settled
+    const ttRect = jsTip.getBoundingClientRect();
+    const ttWidth = ttRect.width || jsTip.offsetWidth;
+    const ttHeight = ttRect.height || jsTip.offsetHeight;
+
+    // Calculate centered left, then clamp
+    let left = targ.left + targ.width / 2 - ttWidth / 2;
+    left = Math.max(pad, Math.min(left, window.innerWidth - ttWidth - pad));
+
+    // Prefer above the target unless inside a sub-field
+    const insideSub = !!target.closest('.sub-field');
+    const preferAbove = !insideSub && (targ.top - pad - ttHeight) >= pad;
+    let top = preferAbove ? targ.top - ttHeight - 6 : targ.bottom + 6;
+
+    // Clamp vertically into viewport
+    top = Math.max(pad, Math.min(top, window.innerHeight - ttHeight - pad));
+
+    jsTip.style.left = `${Math.round(left)}px`;
+    jsTip.style.top = `${Math.round(top)}px`;
+    jsTip.style.visibility = 'visible';
+    // small transform for pop
+    jsTip.style.transform = 'translateY(0)';
+    requestAnimationFrame(() => { jsTip.style.opacity = '1'; });
+  });
+}
+function hideJsTip() {
+  jsTip.style.opacity = '0';
+  if (hideTimer) clearTimeout(hideTimer);
+  hideTimer = window.setTimeout(() => {
+    jsTip.style.display = 'none';
+    hideTimer = null;
+  }, 120);
+}
+// attach to all elements with class 'tip'
+document.querySelectorAll<HTMLElement>('.tip').forEach((el) => {
+  el.addEventListener('mouseenter', () => showJsTip(el));
+  el.addEventListener('mouseleave', () => hideJsTip());
+  el.addEventListener('focus', () => showJsTip(el));
+  el.addEventListener('blur', () => hideJsTip());
 });
 
 // Save
@@ -189,6 +260,9 @@ btnSave.addEventListener("click", () => {
     suspendOnStartup: toggleStartup.checked,
     cacheWarm: toggleCacheWarm.checked,
     closeDuplicates: toggleCloseDuplicates.checked,
+    closeDuplicatesMode: (closeDuplicatesMode ? Number(closeDuplicatesMode.value) : 1) as 1 | 2,
+    closeDuplicatesKeepChecking: closeDuplicatesKeepChecking ? closeDuplicatesKeepChecking.checked : true,
+    closeDuplicatesRescanOnStartup: closeDuplicatesRescanStartup ? closeDuplicatesRescanStartup.checked : false,
     cacheWarmIntervalMinutes: Math.max(1, Math.min(120, Number(cacheWarmIntervalInput.value) || 10)),
     skipActive: true,
     timeoutMinutes: timeout,
@@ -200,6 +274,15 @@ btnSave.addEventListener("click", () => {
     setTimeout(() => toast.classList.remove("show"), 2000);
   });
 });
+
+// Close-duplicates chevron toggles the sub-field (behaves like cache-warm)
+if (closeDuplicatesChevron && closeDuplicatesSub) {
+  closeDuplicatesChevron.addEventListener('click', () => {
+    const open = closeDuplicatesSub.classList.toggle('open');
+    closeDuplicatesChevron.classList.toggle('open', open);
+    closeDuplicatesChevron.setAttribute('aria-expanded', String(open));
+  });
+}
 
 // Suspend Now
 btnSuspendNow.addEventListener("click", () => {
@@ -321,3 +404,5 @@ const _port = chrome.runtime.connect({ name: "popup" });
 
 // Init
 refreshStats();
+
+// Capture preview removed

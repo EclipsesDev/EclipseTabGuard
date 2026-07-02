@@ -241,23 +241,22 @@ async function measureAndRecordBandwidth(tabId: number): Promise<void> {
   }
 }
 
-// Closes any tabs that share the same URL as an existing tab, keeping the leftmost one.
+// Closes any tabs that share the same URL as an existing tab.
+// Mode: keep leftmost (1) or keep latest (2).
 async function closeDuplicateTabs(): Promise<void> {
   const settings = await loadSettings();
   if (!settings.enabled || !settings.closeDuplicates) return;
 
   const tabs = await chrome.tabs.query({});
-  // Sort by index ascending so the leftmost tab is always encountered first
-  const sorted = [...tabs].sort((a, b) => a.index - b.index);
+  const activity = await loadActivity();
 
-  const seen = new Map<string, number>(); // normalized URL to tab id
-  const toClose: number[] = [];
+  const groups = new Map<string, chrome.tabs.Tab[]>();
 
-  for (const tab of sorted) {
+  for (const tab of tabs) {
     const url = tab.url ?? "";
-    if (!url || url.startsWith("chrome:") 
-      || url.startsWith("about:") 
-      || url.startsWith("chrome-extension:") 
+    if (!url || url.startsWith("chrome:")
+      || url.startsWith("about:")
+      || url.startsWith("chrome-extension:")
       || url.startsWith("moz-extension:")) continue;
 
     // Normalize: strip hash so #section differences don't count as separate pages
@@ -270,10 +269,41 @@ async function closeDuplicateTabs(): Promise<void> {
       normalized = url;
     }
 
-    if (seen.has(normalized)) {
-      if (tab.id != null) toClose.push(tab.id);
+    const arr = groups.get(normalized) ?? [];
+    arr.push(tab);
+    groups.set(normalized, arr);
+  }
+
+  const toClose: number[] = [];
+
+  for (const [, group] of groups) {
+    if (group.length < 2) continue;
+
+    let keepId: number | null = null;
+
+    if (settings.closeDuplicatesMode === 2) {
+      // Keep the most recently used/created tab. Prefer our activity map,
+      // then the browser's lastAccessed, then fallback to index ordering.
+      let bestScore = -Infinity;
+      for (const t of group) {
+        const id = t.id ?? -1;
+        const score = (id >= 0 ? (activity.get(id) ?? t.lastAccessed ?? 0) : 0) as number;
+        if (score > bestScore) { bestScore = score; keepId = t.id ?? null; }
+      }
     } else {
-      if (tab.id != null) seen.set(normalized, tab.id);
+      // Default / mode 1: keep the leftmost (smallest index) tab
+      let bestIndex = Infinity;
+      for (const t of group) {
+        const id = t.id ?? -1;
+        const idx = typeof t.index === "number" ? t.index : Infinity;
+        if (idx < bestIndex) { bestIndex = idx; keepId = id >= 0 ? id : keepId; }
+      }
+    }
+
+    for (const t of group) {
+      if (t.id == null) continue;
+      if (keepId != null && t.id === keepId) continue;
+      toClose.push(t.id);
     }
   }
 
@@ -395,6 +425,11 @@ async function init(): Promise<void> {
     await runSuspensionCheck();
   }
 
+  // If requested, run a duplicate re-scan on startup to remove duplicates already open
+  if (settings.closeDuplicates && settings.closeDuplicatesRescanOnStartup) {
+    try { await closeDuplicateTabs(); } catch { /* ignore errors */ }
+  }
+
   // Make sure our periodic check alarm is running — create it if it somehow got cleared
   const existing = await chrome.alarms.get(ALARM_NAME);
   if (!existing) {
@@ -493,6 +528,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && changes[SETTINGS_KEY]) {
     const updated = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue as Partial<Settings>) };
     void chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: updated.cacheWarmIntervalMinutes });
+    // If duplicate-closing was just enabled (or the extension was enabled) and
+    // the user wants us to re-scan existing tabs, run the duplicate closer once.
+    const oldSettings = changes[SETTINGS_KEY].oldValue as Partial<Settings> | undefined;
+    const oldClose = oldSettings?.closeDuplicates ?? DEFAULT_SETTINGS.closeDuplicates;
+    const oldEnabled = oldSettings?.enabled ?? DEFAULT_SETTINGS.enabled;
+    const newClose = updated.closeDuplicates;
+    const newEnabled = updated.enabled;
+    const wantRescan = updated.closeDuplicatesKeepChecking ?? DEFAULT_SETTINGS.closeDuplicatesKeepChecking;
+    if (wantRescan && (!oldClose && newClose || !oldEnabled && newEnabled)) {
+      void closeDuplicateTabs();
+    }
   }
 });
 
