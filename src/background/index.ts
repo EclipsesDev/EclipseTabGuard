@@ -148,13 +148,57 @@ async function loadSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
 }
 
-function matchesDomainList(url: string, patterns: string[]): boolean {
+type PatternMatch =
+  | { kind: "url"; value: URL }
+  | { kind: "domain"; value: string };
+
+function normalizePattern(pattern: string): PatternMatch | null {
+  const raw = pattern.trim();
+  if (!raw) return null;
+
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+  const looksLikeUrl = hasScheme || /[/?#]/.test(raw);
+
+  if (looksLikeUrl) {
+    try {
+      const value = new URL(hasScheme ? raw : `https://${raw}`);
+      value.hash = "";
+      if (value.pathname !== "/") value.pathname = value.pathname.replace(/\/+$/, "");
+      return { kind: "url", value };
+    } catch {
+      // Fall back to treating the input as a domain pattern.
+    }
+  }
+
+  return { kind: "domain", value: raw.toLowerCase() };
+}
+
+function matchesPattern(url: string, pattern: string): boolean {
+  const resolvedPattern = normalizePattern(pattern);
+  if (!resolvedPattern) return false;
+
   try {
-    const hostname = new URL(url).hostname;
-    return patterns.some((p) => hostname === p || hostname.endsWith(`.${p}`));
+    const current = new URL(url);
+
+    if (resolvedPattern.kind === "url") {
+      current.hash = "";
+      if (current.pathname !== "/") current.pathname = current.pathname.replace(/\/+$/, "");
+      return (
+        current.origin === resolvedPattern.value.origin &&
+        current.pathname === resolvedPattern.value.pathname &&
+        current.search === resolvedPattern.value.search
+      );
+    }
+
+    const hostname = current.hostname.toLowerCase();
+    return hostname === resolvedPattern.value || hostname.endsWith(`.${resolvedPattern.value}`);
   } catch {
     return false;
   }
+}
+
+function matchesDomainList(url: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => matchesPattern(url, pattern));
 }
 
 async function runSuspensionCheck(force = false): Promise<void> {

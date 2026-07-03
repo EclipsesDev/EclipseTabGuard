@@ -14,9 +14,9 @@ export type Settings = {
   suspendOnStartup: boolean;
   /** Periodically pre-fetch suspended tab URLs to warm the HTTP cache (BETA) */
   cacheWarm: boolean;  /** How often (in minutes) cache warming runs. Default: 10 */
-  cacheWarmIntervalMinutes: number;  /** Domain patterns to never suspend */
+  cacheWarmIntervalMinutes: number;  /** Domain or URL patterns to never suspend */
   whitelist: string[];
-  /** Domain patterns to always suspend immediately (ignores timeout) */
+  /** Domain or URL patterns to always suspend immediately (ignores timeout) */
   blacklist: string[];
   /** Automatically close duplicate tabs, keeping the leftmost one */
   closeDuplicates: boolean;

@@ -132,6 +132,27 @@ function renderDomainList(
   }
 }
 
+function normalizePatternInput(raw: string): string {
+  const value = raw.trim();
+  if (!value) return "";
+
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+  const looksLikeUrl = hasScheme || /[/?#]/.test(value);
+
+  if (looksLikeUrl) {
+    try {
+      const url = new URL(hasScheme ? value : `https://${value}`);
+      url.hash = "";
+      if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/+$/, "");
+      return url.toString();
+    } catch {
+      // Fall through and keep the raw input.
+    }
+  }
+
+  return value.toLowerCase();
+}
+
 function renderWhitelist(): void {
   renderDomainList(whitelist, whitelistListEl, whitelistEmpty, "whitelist-item", (d) => {
     whitelist = whitelist.filter((x) => x !== d);
@@ -147,7 +168,7 @@ function renderBlacklist(): void {
 }
 
 function addDomainEntry(input: HTMLInputElement, list: string[], render: () => void): void {
-  const value = input.value.trim().toLowerCase().replace(/^https?:\/\//, "");
+  const value = normalizePatternInput(input.value);
   if (!value || list.includes(value)) { input.value = ""; return; }
   list.push(value);
   render();
