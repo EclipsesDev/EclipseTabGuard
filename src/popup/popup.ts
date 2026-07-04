@@ -19,6 +19,8 @@ const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElem
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
 const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
 const toggleCloseDuplicates = document.getElementById("toggle-close-duplicates") as HTMLInputElement;
+const autoSuspendChevron = document.getElementById("auto-suspend-chevron") as HTMLButtonElement | null;
+const autoSuspendSub = document.getElementById("auto-suspend-sub") as HTMLDivElement | null;
 const closeDuplicatesMode = document.getElementById("close-duplicates-mode") as HTMLSelectElement | null;
 const closeDuplicatesKeepChecking = document.getElementById("close-duplicates-keep-checking") as HTMLInputElement | null;
 const closeDuplicatesSub = document.getElementById("close-duplicates-sub") as HTMLDivElement | null;
@@ -99,6 +101,14 @@ function attachRipple(el: HTMLElement): void {
   });
 }
 [btnSave, btnSuspendNow].forEach(attachRipple);
+
+if (autoSuspendChevron && autoSuspendSub) {
+  autoSuspendChevron.addEventListener("click", () => {
+    const open = autoSuspendSub.classList.toggle("open");
+    autoSuspendChevron.classList.toggle("open", open);
+    autoSuspendChevron.setAttribute("aria-expanded", String(open));
+  });
+}
 
 // Cache warming sub-settings chevron
 const cacheWarmChevron = document.getElementById("cache-warm-chevron") as HTMLButtonElement;

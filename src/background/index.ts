@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS } from "../types/index.js";
 // Keeps track of when each tab was last used.
 // Stored in session storage so it survives service worker restarts.
 const ACTIVITY_KEY = "tabActivity";
+const TAB_MEMORY_KEY = "tabMemory";
 const SETTINGS_KEY = "settings";
 const LIFETIME_STATS_KEY = "lifetimeStats";
 const ALARM_NAME = "suspendCheck";
@@ -34,7 +35,7 @@ interface ChromeProcesses {
 // This runs inside the tab itself to get its memory footprint.
 // Returns bytes if the browser supports it, null if there's nothing we can do.
 async function measureTabMemory(): Promise<number | null> {
-  // The only accurate per-page method — requires COOP + COEP headers (most sites don't set them)
+  // The most accurate per-page method — requires COOP + COEP headers (most sites don't set them)
   if (typeof (performance as Performance & { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory === "function") {
     try {
       const r = await (performance as Performance & { measureUserAgentSpecificMemory: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory();
@@ -43,10 +44,49 @@ async function measureTabMemory(): Promise<number | null> {
       // Page isn't cross-origin isolated, so this API throws — move on
     }
   }
-  // NOTE: performance.memory.usedJSHeapSize is intentionally NOT used here.
-  // It reports the entire V8 renderer-process heap (~100 MB baseline), not the
-  // individual tab's footprint, so it gives wildly misleading per-tab numbers.
+  const perfMemory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
+  if (typeof perfMemory?.usedJSHeapSize === "number" && perfMemory.usedJSHeapSize > 0) {
+    return perfMemory.usedJSHeapSize;
+  }
   return null;
+}
+
+type TabMemoryCache = Record<string, number>;
+
+async function loadTabMemoryCache(): Promise<Map<number, number>> {
+  const result = await chrome.storage.session.get(TAB_MEMORY_KEY);
+  const raw = (result[TAB_MEMORY_KEY] ?? {}) as TabMemoryCache;
+  return new Map(Object.entries(raw).map(([k, v]) => [Number(k), v]));
+}
+
+async function saveTabMemoryCache(map: Map<number, number>): Promise<void> {
+  const raw: TabMemoryCache = {};
+  for (const [k, v] of map) raw[String(k)] = v;
+  await chrome.storage.session.set({ [TAB_MEMORY_KEY]: raw });
+}
+
+async function captureTabMemory(tabId: number): Promise<number | null> {
+  if (typeof chrome.scripting?.executeScript !== "function") return null;
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: measureTabMemory,
+    });
+    const bytes = results?.[0]?.result;
+    return typeof bytes === "number" && bytes > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordTabMemory(tabId: number): Promise<void> {
+  const bytes = await captureTabMemory(tabId);
+  if (bytes == null) return;
+
+  const cache = await loadTabMemoryCache();
+  cache.set(tabId, bytes);
+  await saveTabMemoryCache(cache);
 }
 
 // Figures out how much RAM the given tabs are currently using.
@@ -233,6 +273,7 @@ async function runSuspensionCheck(force = false): Promise<void> {
     const lastActive = activity.get(tab.id) ?? tab.lastAccessed ?? 0;
     if (forceDiscard || force || now - lastActive >= thresholdMs) {
       try {
+        await recordTabMemory(tab.id);
         await chrome.tabs.discard(tab.id);
         newSuspensions++;
       } catch {
@@ -272,8 +313,9 @@ async function measureAndRecordBandwidth(tabId: number): Promise<void> {
     const results = await chrome.scripting.executeScript({
       target: { tabId },
       func: () => {
+        const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
         const entries = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
-        return entries.reduce((sum, e) => sum + (e.transferSize ?? 0), 0);
+        return (navigation?.transferSize ?? 0) + entries.reduce((sum, e) => sum + (e.transferSize ?? 0), 0);
       },
     });
     const bytes = results?.[0]?.result;
@@ -374,6 +416,11 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   void removeTabRecord(tabId);
+  void (async () => {
+    const cache = await loadTabMemoryCache();
+    if (!cache.delete(tabId)) return;
+    await saveTabMemoryCache(cache);
+  })();
 });
 
 // Whenever a tab finishes loading, reset its idle timer and record the bandwidth it used.
@@ -381,6 +428,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     void recordActivity(tabId);
+    void recordTabMemory(tabId);
     const url = tab.url ?? "";
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void incrementLifetimeStats({ totalPageLoads: 1 });
@@ -496,11 +544,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       const active = activeTabs.length;
       const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
       const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
+      const memoryCache = await loadTabMemoryCache();
 
       const { mb: memoryUsedMB, estimated: memoryIsEstimated } = await getTabsMemoryMB(activeTabs);
-      // For saved memory, we use the average cost of an active tab as the estimate per suspended one
-      const avgMemPerTab = active > 0 ? memoryUsedMB / active : MEM_PER_TAB_MB_FALLBACK;
-      const memorySavedMB = suspended * avgMemPerTab;
+      let memorySavedBytes = 0;
+      let memorySavedIsEstimated = false;
+
+      for (const tab of suspendedTabs) {
+        if (tab.id == null) continue;
+        const cachedBytes = memoryCache.get(tab.id);
+        if (typeof cachedBytes === "number" && cachedBytes > 0) {
+          memorySavedBytes += cachedBytes;
+          continue;
+        }
+
+        memorySavedBytes += MEM_PER_TAB_MB_FALLBACK * 1024 * 1024;
+        memorySavedIsEstimated = true;
+      }
+
+      const memorySavedMB = memorySavedBytes / (1024 * 1024);
 
       sendResponse({
         total: tabs.length,
@@ -508,7 +570,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         suspended,
         memoryUsedMB,
         memorySavedMB,
-        memoryIsEstimated,
+        memoryIsEstimated: memoryIsEstimated || memorySavedIsEstimated,
         bandwidthUsedMB: (ls.totalBandwidthBytes ?? 0) / (1024 * 1024),
         bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
       } satisfies StatsResponse);

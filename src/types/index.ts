@@ -1,6 +1,6 @@
 export type Settings = {
   enabled: boolean;
-  /** Minutes a tab must be inactive before being suspended. Default: 30 */
+  /** Minutes a tab must be inactive before being suspended. Default: 3 */
   timeoutMinutes: number;
   /** Never suspend pinned tabs */
   skipPinned: boolean;

@@ -18,13 +18,20 @@
       --radius: 10px;
       --ease: cubic-bezier(0.4,0,0.2,1);
     }
+    html {
+      background: var(--bg);
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       width: 380px;
       background: var(--bg);
       color: var(--text);
       font: 13px system-ui, sans-serif;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2e2e4a transparent;
+      scrollbar-gutter: stable;
     }
 
     /* ── Header ── */
@@ -42,31 +49,6 @@
       color: var(--accent-light);
       letter-spacing: 0.01em;
     }
-    .toggle-sm { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
-    .toggle-sm input { opacity: 0; width: 0; height: 0; position: absolute; }
-    .slider-sm {
-      position: absolute; inset: 0;
-      background: #2a2a40;
-      border-radius: 20px;
-      cursor: pointer;
-      transition: background 0.2s var(--ease);
-    }
-    .slider-sm::before {
-      content: "";
-      position: absolute;
-      width: 14px; height: 14px;
-      left: 3px; top: 3px;
-      background: #666;
-      border-radius: 50%;
-      transition: transform 0.25s var(--ease), background 0.2s, box-shadow 0.2s;
-    }
-    .toggle-sm input:checked + .slider-sm { background: var(--accent); }
-    .toggle-sm input:checked + .slider-sm::before {
-      transform: translateX(16px);
-      background: #fff;
-      box-shadow: 0 0 8px var(--accent-glow);
-    }
-
     /* ── Stats ── */
     .stats {
       display: flex;
@@ -144,7 +126,7 @@
     .tab-btn:not(.active):hover { color: var(--text); background: var(--surface2); }
 
     /* ── Panels ── */
-    .panels { padding: 12px 16px 0; min-height: 148px; }
+    .panels { padding: 12px 16px 0; min-height: 0; }
     .panel { display: none; animation: fadeUp 0.18s var(--ease); }
     .panel.active { display: block; }
     @keyframes fadeUp {
@@ -274,15 +256,12 @@
     .chevron:hover { color: var(--accent-light); border-color: var(--accent); background: #252545; }
     .chevron.open { transform: rotate(90deg); color: var(--accent-light); border-color: var(--accent); background: #252545; }
     .sub-field {
-      overflow: hidden;
-      max-height: 0;
-      opacity: 0;
-      transition: max-height 0.22s var(--ease), opacity 0.18s var(--ease);
+      display: none;
       padding-left: 10px;
       border-left: 2px solid #232340;
       margin-left: 4px;
     }
-    .sub-field.open { max-height: 140px; opacity: 1; overflow: visible; margin-bottom: 8px; }
+    .sub-field.open { display: block; margin-bottom: 0; }
 
     .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
     .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
@@ -338,6 +317,22 @@
       outline: none;
     }
     .field input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+    .row-end input[type="number"] {
+      width: 58px;
+      padding: 5px 8px;
+      background: var(--surface);
+      border: 1px solid #2e2e4a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      text-align: right;
+      outline: none;
+      transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+    }
+    .row-end input[type="number"]:focus {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px var(--accent-glow);
     }
@@ -583,10 +578,6 @@
   <div class="header">
     <img src="../icons/icon-48.png" alt="">
     <span class="header-title">EclipseTabGuard</span>
-    <label class="toggle-sm" title="Enable / disable auto-suspend">
-      <input type="checkbox" id="toggle-enabled">
-      <span class="slider-sm"></span>
-    </label>
   </div>
 
   <!-- Stats -->
@@ -645,20 +636,31 @@
     <!-- Settings -->
     <div class="panel active" id="panel-settings">
       <div class="row">
-        <span class="row-label">Skip pinned tabs<span class="tip" data-tip="Pinned tabs will never be suspended, regardless of how long they&#39;ve been inactive.">?</span></span>
-        <label class="toggle"><input type="checkbox" id="toggle-pinned"><span class="slider"></span></label>
+        <span class="row-label"><button class="chevron" id="auto-suspend-chevron" title="Options" aria-expanded="false">&#8250;</button> Auto suspend<span class="tip" data-tip="Turns the tab suspension engine on or off. When disabled, no tabs will be automatically suspended.">?</span></span>
+        <label class="toggle"><input type="checkbox" id="toggle-enabled"><span class="slider"></span></label>
       </div>
-      <div class="row">
-        <span class="row-label">Skip audible tabs<span class="tip" data-tip="Tabs currently playing audio or video will not be suspended while sound is active.">?</span></span>
-        <label class="toggle"><input type="checkbox" id="toggle-audible"><span class="slider"></span></label>
-      </div>
-      <div class="row">
-        <span class="row-label">Skip loading tabs<span class="tip" data-tip="Tabs that are still loading will be left alone until they finish loading.">?</span></span>
-        <label class="toggle"><input type="checkbox" id="toggle-loading"><span class="slider"></span></label>
-      </div>
-      <div class="row">
-        <span class="row-label">Suspend on startup<span class="tip" data-tip="When the browser launches, all background tabs are immediately suspended to free up memory right away.">?</span></span>
-        <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
+      <div class="sub-field" id="auto-suspend-sub">
+        <div class="field">
+          <span class="field-label">Suspend after<span class="tip" data-tip="A tab inactive for this many minutes will be automatically suspended to free memory.">?</span></span>
+          <input type="number" id="timeout-input" min="1" max="1440" value="30">
+          <span class="field-unit">min</span>
+        </div>
+        <div class="field">
+          <span class="field-label">Skip pinned tabs<span class="tip" data-tip="Pinned tabs will never be suspended, regardless of how long they&#39;ve been inactive.">?</span></span>
+          <label class="toggle"><input type="checkbox" id="toggle-pinned"><span class="slider"></span></label>
+        </div>
+        <div class="field">
+          <span class="field-label">Skip audible tabs<span class="tip" data-tip="Tabs currently playing audio or video will not be suspended while sound is active.">?</span></span>
+          <label class="toggle"><input type="checkbox" id="toggle-audible"><span class="slider"></span></label>
+        </div>
+        <div class="field">
+          <span class="field-label">Skip loading tabs<span class="tip" data-tip="Tabs that are still loading will be left alone until they finish loading.">?</span></span>
+          <label class="toggle"><input type="checkbox" id="toggle-loading"><span class="slider"></span></label>
+        </div>
+        <div class="field">
+          <span class="field-label">Suspend on startup<span class="tip" data-tip="When the browser launches, all background tabs are immediately suspended to free up memory right away.">?</span></span>
+          <label class="toggle"><input type="checkbox" id="toggle-startup"><span class="slider"></span></label>
+        </div>
       </div>
       <div class="row">
         <span class="row-label"><button class="chevron" id="close-duplicates-chevron" title="Options" aria-expanded="false">&#8250;</button> Close duplicate tabs<span class="tag-beta">BETA</span><span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed.">?</span></span>
@@ -691,11 +693,6 @@
           <input type="number" id="cache-warm-interval-input" min="1" max="120" value="10">
           <span class="field-unit">min</span>
         </div>
-      </div>
-      <div class="field">
-        <span class="field-label">Suspend after<span class="tip" data-tip="A tab inactive for this many minutes will be automatically suspended to free memory.">?</span></span>
-        <input type="number" id="timeout-input" min="1" max="1440" value="30">
-        <span class="field-unit">min</span>
       </div>
     </div>
 
