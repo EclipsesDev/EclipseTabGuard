@@ -481,15 +481,26 @@ async function runCacheWarm(): Promise<void> {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_NAME) {
-    void runSuspensionCheck();
+    void runSuspensionCheck().catch(() => undefined);
   }
   if (alarm.name === CACHE_WARM_ALARM) {
-    void runCacheWarm();
+    void runCacheWarm().catch(() => undefined);
   }
 });
 
+async function ensureAlarms(cacheWarmIntervalMinutes: number): Promise<void> {
+  const existing = await chrome.alarms.get(ALARM_NAME);
+  if (!existing) {
+    await chrome.alarms.create(ALARM_NAME, { periodInMinutes: CHECK_INTERVAL_MINUTES });
+  }
+
+  await chrome.alarms.clear(CACHE_WARM_ALARM);
+  await chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: cacheWarmIntervalMinutes });
+}
+
 async function init(): Promise<void> {
   const settings = await loadSettings();
+  await ensureAlarms(settings.cacheWarmIntervalMinutes);
   const existingActivity = await loadActivity();
   const isFreshStart = existingActivity.size === 0;
 
@@ -522,58 +533,63 @@ async function init(): Promise<void> {
     try { await closeDuplicateTabs(); } catch { /* ignore errors */ }
   }
 
-  // Make sure our periodic check alarm is running — create it if it somehow got cleared
-  const existing = await chrome.alarms.get(ALARM_NAME);
-  if (!existing) {
-    chrome.alarms.create(ALARM_NAME, { periodInMinutes: CHECK_INTERVAL_MINUTES });
-  }
-
-  // Always recreate the warm alarm so its period reflects the current setting
-  await chrome.alarms.clear(CACHE_WARM_ALARM);
-  chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: settings.cacheWarmIntervalMinutes });
 }
 
 // The popup talks to us through message passing — handle whatever it needs
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "getStats") {
     (async () => {
-      const tabs = await chrome.tabs.query({});
-      const suspendedTabs = tabs.filter((t) => t.discarded);
-      const activeTabs = tabs.filter((t) => !t.discarded);
-      const suspended = suspendedTabs.length;
-      const active = activeTabs.length;
-      const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
-      const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
-      const memoryCache = await loadTabMemoryCache();
+      try {
+        const tabs = await chrome.tabs.query({});
+        const suspendedTabs = tabs.filter((t) => t.discarded);
+        const activeTabs = tabs.filter((t) => !t.discarded);
+        const r = await chrome.storage.local.get(LIFETIME_STATS_KEY);
+        const ls = (r[LIFETIME_STATS_KEY] ?? {}) as LifetimeStats;
+        const memoryCache = await loadTabMemoryCache();
 
-      const { mb: memoryUsedMB, estimated: memoryIsEstimated } = await getTabsMemoryMB(activeTabs);
-      let memorySavedBytes = 0;
-      let memorySavedIsEstimated = false;
+        const memoryResult = await Promise.race([
+          getTabsMemoryMB(activeTabs),
+          new Promise<{ mb: number; estimated: boolean }>((resolve) =>
+            setTimeout(() => resolve({ mb: activeTabs.length * MEM_PER_TAB_MB_FALLBACK, estimated: true }), 2500)
+          ),
+        ]);
+        let memorySavedBytes = 0;
+        let memorySavedIsEstimated = false;
 
-      for (const tab of suspendedTabs) {
-        if (tab.id == null) continue;
-        const cachedBytes = memoryCache.get(tab.id);
-        if (typeof cachedBytes === "number" && cachedBytes > 0) {
-          memorySavedBytes += cachedBytes;
-          continue;
+        for (const tab of suspendedTabs) {
+          if (tab.id == null) continue;
+          const cachedBytes = memoryCache.get(tab.id);
+          if (typeof cachedBytes === "number" && cachedBytes > 0) {
+            memorySavedBytes += cachedBytes;
+            continue;
+          }
+
+          memorySavedBytes += MEM_PER_TAB_MB_FALLBACK * 1024 * 1024;
+          memorySavedIsEstimated = true;
         }
 
-        memorySavedBytes += MEM_PER_TAB_MB_FALLBACK * 1024 * 1024;
-        memorySavedIsEstimated = true;
+        sendResponse({
+          total: tabs.length,
+          active: activeTabs.length,
+          suspended: suspendedTabs.length,
+          memoryUsedMB: memoryResult.mb,
+          memorySavedMB: memorySavedBytes / (1024 * 1024),
+          memoryIsEstimated: memoryResult.estimated || memorySavedIsEstimated,
+          bandwidthUsedMB: (ls.totalBandwidthBytes ?? 0) / (1024 * 1024),
+          bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
+        } satisfies StatsResponse);
+      } catch {
+        sendResponse({
+          total: 0,
+          active: 0,
+          suspended: 0,
+          memoryUsedMB: 0,
+          memorySavedMB: 0,
+          memoryIsEstimated: true,
+          bandwidthUsedMB: 0,
+          bandwidthSavedMB: 0,
+        } satisfies StatsResponse);
       }
-
-      const memorySavedMB = memorySavedBytes / (1024 * 1024);
-
-      sendResponse({
-        total: tabs.length,
-        active,
-        suspended,
-        memoryUsedMB,
-        memorySavedMB,
-        memoryIsEstimated: memoryIsEstimated || memorySavedIsEstimated,
-        bandwidthUsedMB: (ls.totalBandwidthBytes ?? 0) / (1024 * 1024),
-        bandwidthSavedMB: (ls.totalSuspensions ?? 0) * BW_PER_SUSPEND_MB,
-      } satisfies StatsResponse);
     })();
     return true;
   }
@@ -633,7 +649,7 @@ export type StatsResponse = {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && changes[SETTINGS_KEY]) {
     const updated = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue as Partial<Settings>) };
-    void chrome.alarms.create(CACHE_WARM_ALARM, { periodInMinutes: updated.cacheWarmIntervalMinutes });
+    void ensureAlarms(updated.cacheWarmIntervalMinutes);
     // If duplicate-closing was just enabled (or the extension was enabled) and
     // the user wants us to re-scan existing tabs, run the duplicate closer once.
     const oldSettings = changes[SETTINGS_KEY].oldValue as Partial<Settings> | undefined;

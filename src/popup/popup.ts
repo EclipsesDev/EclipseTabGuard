@@ -64,8 +64,13 @@ function formatMB(mb: number): string {
 }
 
 // Stats
-function refreshStats(): void {
+function refreshStats(attempt = 0): void {
   chrome.runtime.sendMessage({ type: "getStats" }, (resp: StatsResponse | undefined) => {
+    const looksLikeTransientFallback = resp && resp.total === 0 && resp.active === 0 && resp.suspended === 0;
+    if ((chrome.runtime.lastError || !resp || looksLikeTransientFallback) && attempt < 3) {
+      window.setTimeout(() => refreshStats(attempt + 1), 250);
+      return;
+    }
     if (chrome.runtime.lastError || !resp) return;
     animateCounter(statTotal, resp.total);
     animateCounter(statActive, resp.active);
