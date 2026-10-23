@@ -31,7 +31,6 @@
         "storage",
         "alarms",
         "idle",
-        "processes",
         "scripting"
     ],
     "host_permissions": [
