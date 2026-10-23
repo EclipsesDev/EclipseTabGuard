@@ -69,10 +69,13 @@ async function captureTabMemory(tabId: number): Promise<number | null> {
   if (typeof chrome.scripting?.executeScript !== "function") return null;
 
   try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: measureTabMemory,
-    });
+    const results = await Promise.race([
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: measureTabMemory,
+      }),
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 500)),
+    ]);
     const bytes = results?.[0]?.result;
     return typeof bytes === "number" && bytes > 0 ? bytes : null;
   } catch {
@@ -122,48 +125,6 @@ async function getTabsMemoryMB(tabs: chrome.tabs.Tab[]): Promise<{ mb: number; e
       }
     } catch {
       // Something went wrong with the processes API — try the next method
-    }
-  }
-
-  // Second option: inject a small script into each tab and ask it directly.
-  // Works on both Chrome and Firefox for normal web pages.
-  if (typeof chrome.scripting?.executeScript === "function") {
-    try {
-      let totalBytes = 0;
-      let measuredCount = 0;
-
-      await Promise.all(
-        tabs.map(async (tab) => {
-          if (tab.id == null) return;
-          const url = tab.url ?? "";
-          // We can't inject into browser-internal pages, so skip those
-          if (url.startsWith("about:") || url.startsWith("chrome:") || url.startsWith("moz-extension:") || url.startsWith("chrome-extension:") || url === "") return;
-          try {
-            const results = await chrome.scripting.executeScript({
-              target: { tabId: tab.id },
-              func: measureTabMemory,
-            });
-            const bytes = results?.[0]?.result;
-            if (typeof bytes === "number") {
-              totalBytes += bytes;
-              measuredCount++;
-            }
-          } catch {
-            // Some tabs can't be injected into (PDFs, file:// pages, etc.) — just skip them
-          }
-        })
-      );
-
-      if (measuredCount > 0) {
-        const avgBytes = totalBytes / measuredCount;
-        // For tabs we couldn't measure, use the average of the ones we could
-        const estimatedBytes = avgBytes * (tabIds.length - measuredCount);
-        // Fully measured only if every tab returned a real value
-        const estimated = measuredCount < tabIds.length;
-        return { mb: (totalBytes + estimatedBytes) / (1024 * 1024), estimated };
-      }
-    } catch {
-      // Scripting API not available — fall through to the rough estimate
     }
   }
 
@@ -273,8 +234,8 @@ async function runSuspensionCheck(force = false): Promise<void> {
     const lastActive = activity.get(tab.id) ?? tab.lastAccessed ?? 0;
     if (forceDiscard || force || now - lastActive >= thresholdMs) {
       try {
-        await recordTabMemory(tab.id);
         await chrome.tabs.discard(tab.id);
+        void recordTabMemory(tab.id);
         newSuspensions++;
       } catch {
         // Tab was probably closed or already gone — nothing to do
