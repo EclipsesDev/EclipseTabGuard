@@ -15,6 +15,7 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 - **Suspend on startup** — optionally suspend all background tabs the moment the browser opens
 - **Suspend Now** — manually trigger suspension of all eligible tabs instantly
 - **Cache warming** *(beta)* — periodically re-fetches suspended tab URLs in the background to keep them fresh in the HTTP cache, so they load faster when clicked
+- **Save video timestamps** *(beta)* — optionally save video timestamps when paused and restore them after a page reload; saved timestamps can be managed from the popup's Videos panel
 
 ## Smart skip rules
 
@@ -28,11 +29,13 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 | Inactivity timeout | 3 minutes |
 | Cache warming | off |
 | Cache warm interval | 10 minutes |
+| Save video timestamps | off |
 
 ## Storage
 
 - **Settings** — saved to `chrome.storage.sync` (synced across devices, 100 KB limit)
 - **Tab activity timestamps** — saved to `chrome.storage.session` (in-memory, cleared on browser close)
+- **Saved video timestamps** — saved to `chrome.storage.local` on this device; view or delete individual timestamps, or clear them all, from the Videos panel
 
 ## Development
 
@@ -52,12 +55,13 @@ Load the `dist/` folder as an unpacked extension in your browser.
 | `storage` | Persist settings (`local`) and activity timestamps (`session`) |
 | `alarms` | Schedule a periodic suspension check every 1 minute |
 | `idle` | Reserved for future idle-state awareness |
+| `scripting` + host access | Inject the optional video-timestamp monitor into open web pages |
 
 ## Privacy
 
-EclipseTabGuard does not collect, store, or transmit any user data.
+EclipseTabGuard does not transmit user data.
 
-All suspension logic runs entirely on your device. The extension reads tab metadata (URL hostname, active/pinned/audible state) solely to decide whether to suspend a tab — this data is never sent anywhere, logged, or shared with any third party.
+All extension logic runs on your device. When Save video timestamps is enabled, the extension reads video timestamps and the page title and URL when a video is paused. These records are stored in the browser's local extension storage and can be individually deleted or cleared from the Videos panel. The feature is off by default.
 
 ## License
 

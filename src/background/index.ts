@@ -1,7 +1,7 @@
 export {};
 
-import type { Settings, TabRecord, TabInfo } from "../types/index.js";
-import { DEFAULT_SETTINGS } from "../types/index.js";
+import type { Settings, StoredSettings, TabRecord, TabInfo, VideoPositionRecord } from "../types/index.js";
+import { createVideoPositionId, DEFAULT_SETTINGS, normalizeSettings } from "../types/index.js";
 
 // Keeps track of when each tab was last used.
 // Stored in session storage so it survives service worker restarts.
@@ -9,6 +9,7 @@ const ACTIVITY_KEY = "tabActivity";
 const TAB_MEMORY_KEY = "tabMemory";
 const SETTINGS_KEY = "settings";
 const LIFETIME_STATS_KEY = "lifetimeStats";
+const VIDEO_POSITIONS_KEY = "savedVideoPositions";
 const ALARM_NAME = "suspendCheck";
 const CHECK_INTERVAL_MINUTES = 1;
 const CACHE_WARM_ALARM = "cacheWarm";
@@ -144,9 +145,102 @@ async function saveActivity(map: Map<number, number>): Promise<void> {
   await chrome.storage.session.set({ [ACTIVITY_KEY]: raw });
 }
 
+type VideoPositionInput = Omit<VideoPositionRecord, "id" | "updatedAt">;
+
+let videoPositionWriteQueue: Promise<void> = Promise.resolve();
+
+async function loadVideoPositions(): Promise<Record<string, VideoPositionRecord>> {
+  const result = await chrome.storage.local.get(VIDEO_POSITIONS_KEY);
+  const raw = (result[VIDEO_POSITIONS_KEY] ?? {}) as Record<string, VideoPositionRecord>;
+  const normalized: Record<string, VideoPositionRecord> = {};
+  let needsPersistence = false;
+
+  for (const [storedId, record] of Object.entries(raw)) {
+    if (!record || typeof record.pageUrl !== "string" || !Number.isInteger(record.videoIndex)) {
+      needsPersistence = true;
+      console.warn("EclipseTabGuard ignored a malformed saved video timestamp record:", record);
+      continue;
+    }
+    const id = createVideoPositionId(record.pageUrl, record.videoIndex);
+    const existing = normalized[id];
+    if (storedId !== id || record.id !== id || existing) needsPersistence = true;
+    if (!existing || record.updatedAt >= existing.updatedAt) {
+      normalized[id] = { ...record, id };
+    }
+  }
+
+  if (needsPersistence) {
+    await chrome.storage.local.set({ [VIDEO_POSITIONS_KEY]: normalized });
+  }
+
+  return normalized;
+}
+
+function updateVideoPositions(
+  update: (positions: Record<string, VideoPositionRecord>) => void
+): Promise<void> {
+  const operation = videoPositionWriteQueue.then(async () => {
+    const positions = await loadVideoPositions();
+    update(positions);
+    await chrome.storage.local.set({ [VIDEO_POSITIONS_KEY]: positions });
+  });
+  videoPositionWriteQueue = operation.catch((error: unknown) => {
+    console.error("EclipseTabGuard could not update saved video timestamps:", error);
+  });
+  return operation;
+}
+
+function normalizeVideoPositionInput(value: unknown): VideoPositionInput | null {
+  if (typeof value !== "object" || value == null) return null;
+  const input = value as Partial<VideoPositionInput>;
+  if (
+    typeof input.pageUrl !== "string" ||
+    typeof input.title !== "string" ||
+    !Number.isInteger(input.videoIndex) ||
+    typeof input.videoIndex !== "number" ||
+    input.videoIndex < 0 ||
+    typeof input.positionSeconds !== "number" ||
+    !Number.isFinite(input.positionSeconds) ||
+    input.positionSeconds <= 0 ||
+    typeof input.durationSeconds !== "number" ||
+    !Number.isFinite(input.durationSeconds) ||
+    input.durationSeconds < 0
+  ) {
+    return null;
+  }
+
+  try {
+    const pageUrl = new URL(input.pageUrl);
+    if (pageUrl.protocol !== "http:" && pageUrl.protocol !== "https:") return null;
+    pageUrl.hash = "";
+    return {
+      pageUrl: pageUrl.href,
+      title: input.title.slice(0, 300),
+      videoIndex: input.videoIndex,
+      positionSeconds: input.positionSeconds,
+      durationSeconds: input.durationSeconds,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function injectVideoPositionScript(tab: chrome.tabs.Tab): Promise<void> {
+  if (tab.id == null || tab.discarded || !/^https?:\/\//i.test(tab.url ?? "")) return;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content/video-timestamp.js"],
+    });
+  } catch (error) {
+    console.warn(`EclipseTabGuard could not monitor videos on ${tab.url}:`, error);
+  }
+}
+
 async function loadSettings(): Promise<Settings> {
   const result = await chrome.storage.sync.get(SETTINGS_KEY);
-  return { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
+  return normalizeSettings(result[SETTINGS_KEY] as StoredSettings | undefined);
 }
 
 type PatternMatch =
@@ -390,6 +484,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete") {
     void recordActivity(tabId);
     void recordTabMemory(tabId);
+    void loadSettings().then((settings) => {
+      if (settings.saveVideoPositions) return injectVideoPositionScript(tab);
+    }).catch((error: unknown) => {
+      console.error("EclipseTabGuard could not load video-timestamp settings:", error);
+    });
     const url = tab.url ?? "";
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void incrementLifetimeStats({ totalPageLoads: 1 });
@@ -469,6 +568,10 @@ async function init(): Promise<void> {
   const tabs = await chrome.tabs.query({});
   const now = Date.now();
 
+  if (settings.saveVideoPositions) {
+    await Promise.all(tabs.map(injectVideoPositionScript));
+  }
+
   for (const tab of tabs) {
     if (tab.id == null) continue;
     if (!activity.has(tab.id)) {
@@ -498,6 +601,83 @@ async function init(): Promise<void> {
 
 // The popup talks to us through message passing — handle whatever it needs
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === "saveVideoPosition") {
+    const input = normalizeVideoPositionInput(msg.record);
+    if (!input) {
+      sendResponse({ ok: false, error: "Invalid video timestamp." });
+      return;
+    }
+
+    const id = createVideoPositionId(input.pageUrl, input.videoIndex);
+    void updateVideoPositions((positions) => {
+      positions[id] = { ...input, id, updatedAt: Date.now() };
+    }).then(
+      () => sendResponse({ ok: true }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not save a video timestamp:", error);
+        sendResponse({ ok: false, error: "Could not save this video timestamp." });
+      }
+    );
+    return true;
+  }
+
+  if (msg.type === "getVideoPosition") {
+    const id = typeof msg.id === "string" ? msg.id : "";
+    void videoPositionWriteQueue.then(loadVideoPositions).then(
+      (positions) => sendResponse({ record: id ? positions[id] ?? null : null }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not load a video timestamp:", error);
+        sendResponse({ record: null, error: "Could not load this video timestamp." });
+      }
+    );
+    return true;
+  }
+
+  if (msg.type === "getVideoPositions") {
+    void videoPositionWriteQueue.then(loadVideoPositions).then(
+      (positions) => sendResponse({
+        records: Object.values(positions).sort((a, b) => b.updatedAt - a.updatedAt),
+      }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not load saved video timestamps:", error);
+        sendResponse({ records: [], error: "Could not load saved video timestamps." });
+      }
+    );
+    return true;
+  }
+
+  if (msg.type === "deleteVideoPosition") {
+    const id = msg.id;
+    if (typeof id !== "string") {
+      sendResponse({ ok: false, error: "Invalid video timestamp ID." });
+      return;
+    }
+
+    void updateVideoPositions((positions) => {
+      delete positions[id];
+    }).then(
+      () => sendResponse({ ok: true }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not delete a video timestamp:", error);
+        sendResponse({ ok: false, error: "Could not delete this video timestamp." });
+      }
+    );
+    return true;
+  }
+
+  if (msg.type === "clearVideoPositions") {
+    void updateVideoPositions((positions) => {
+      for (const id of Object.keys(positions)) delete positions[id];
+    }).then(
+      () => sendResponse({ ok: true }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not clear saved video timestamps:", error);
+        sendResponse({ ok: false, error: "Could not clear saved video timestamps." });
+      }
+    );
+    return true;
+  }
+
   if (msg.type === "getStats") {
     (async () => {
       try {
@@ -609,11 +789,18 @@ export type StatsResponse = {
 // When the user saves settings, recreate the cache-warm alarm with the updated interval
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && changes[SETTINGS_KEY]) {
-    const updated = { ...DEFAULT_SETTINGS, ...(changes[SETTINGS_KEY].newValue as Partial<Settings>) };
+    const updated = normalizeSettings(changes[SETTINGS_KEY].newValue as StoredSettings | undefined);
     void ensureAlarms(updated.cacheWarmIntervalMinutes);
+    const oldSettings = changes[SETTINGS_KEY].oldValue as StoredSettings | undefined;
+    const oldSaveVideoTimestamps = normalizeSettings(oldSettings).saveVideoPositions;
+    if (!oldSaveVideoTimestamps && updated.saveVideoPositions) {
+      void chrome.tabs.query({}).then((tabs) => Promise.all(tabs.map(injectVideoPositionScript))).catch((error: unknown) => {
+        console.error("EclipseTabGuard could not prepare open tabs for video-timestamp saving:", error);
+      });
+    }
+
     // If duplicate-closing was just enabled (or the extension was enabled) and
     // the user wants us to re-scan existing tabs, run the duplicate closer once.
-    const oldSettings = changes[SETTINGS_KEY].oldValue as Partial<Settings> | undefined;
     const oldClose = oldSettings?.closeDuplicates ?? DEFAULT_SETTINGS.closeDuplicates;
     const oldEnabled = oldSettings?.enabled ?? DEFAULT_SETTINGS.enabled;
     const newClose = updated.closeDuplicates;

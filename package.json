@@ -31,7 +31,7 @@
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "typecheck": "tsc --noEmit",
-    "compile": "esbuild src/popup/popup.ts src/background/index.ts --outdir=dist --outbase=src --bundle --minify --target=esnext",
+    "compile": "esbuild src/popup/popup.ts src/background/index.ts src/content/video-timestamp.ts --outdir=dist --outbase=src --bundle --minify --target=esnext",
     "copy-assets": "node -e \"const fs=require('fs');fs.cpSync('manifest.json','dist/manifest.json');fs.mkdirSync('dist/popup',{recursive:true});fs.cpSync('src/popup/popup.html','dist/popup/popup.html');fs.cpSync('src/icons','dist/icons',{recursive:true})\"",
     "build": "npm run clean && npm run typecheck && npm run compile && npm run copy-assets",
     "package": "npm run build && cd dist && tar -cf ../eclipsetabguard.zip --format=zip *"

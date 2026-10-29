@@ -486,6 +486,56 @@
     .badge-suspended { background: rgba(100,100,140,0.2); color: #666; }
     .badge-pinned   { background: rgba(251,191,36,0.15); color: #fbbf24; }
 
+    .position-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .position-panel-title { font-size: 12px; font-weight: 600; color: var(--text); }
+    .btn-clear {
+      padding: 5px 8px;
+      background: rgba(239,68,68,0.12);
+      color: #f87171;
+      border: 1px solid rgba(239,68,68,0.25);
+    }
+    .btn-clear:hover { filter: brightness(1.2); }
+    .video-position-list {
+      list-style: none;
+      max-height: 190px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #2e2e4a transparent;
+    }
+    .video-position-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      margin-bottom: 4px;
+      border-radius: 7px;
+      background: var(--surface);
+      border-left: 2px solid var(--accent);
+    }
+    .video-position-info { min-width: 0; flex: 1; }
+    .video-position-title, .video-position-url {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .video-position-title { font-size: 11px; color: var(--text); }
+    .video-position-url { font-size: 10px; color: var(--muted); }
+    .video-position-time { flex-shrink: 0; font-size: 10px; color: var(--accent-light); font-variant-numeric: tabular-nums; }
+    .video-position-delete {
+      border: 0;
+      background: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 16px;
+      padding: 0 3px;
+    }
+    .video-position-delete:hover { color: var(--danger); }
+
     /* Tab action buttons (shown on hover) */
     .tab-badge        { transition: opacity 0.12s var(--ease); }
     .tab-actions {
@@ -628,6 +678,7 @@
     <button class="tab-btn" data-tab="whitelist">Whitelist</button>
     <button class="tab-btn" data-tab="blacklist">Blacklist</button>
     <button class="tab-btn" data-tab="tabs">Tabs</button>
+    <button class="tab-btn" data-tab="positions" title="Saved video timestamps">Videos</button>
   </div>
 
   <!-- Panels -->
@@ -663,7 +714,7 @@
         </div>
       </div>
       <div class="row">
-        <span class="row-label"><button class="chevron" id="close-duplicates-chevron" title="Options" aria-expanded="false">&#8250;</button> Close duplicate tabs<span class="tag-beta">BETA</span><span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed.">?</span></span>
+        <span class="row-label"><button class="chevron" id="close-duplicates-chevron" title="Options" aria-expanded="false">&#8250;</button> Close duplicate tabs<span class="tip" data-tip="When the same URL is open in multiple tabs, the duplicates are automatically closed.">?</span></span>
         <label class="toggle"><input type="checkbox" id="toggle-close-duplicates"><span class="slider"></span></label>
       </div>
       <div class="sub-field" id="close-duplicates-sub">
@@ -694,6 +745,10 @@
           <span class="field-unit">min</span>
         </div>
       </div>
+      <div class="row">
+        <span class="row-label">Save video timestamps<span class="tag-beta">BETA</span><span class="tip" data-tip="Save the timestamp of videos when paused and restore it after a page reload. This works best for videos embedded directly on the page; timestamps stay on this device.">?</span></span>
+        <label class="toggle"><input type="checkbox" id="toggle-video-positions"><span class="slider"></span></label>
+      </div>
     </div>
 
     <!-- Whitelist -->
@@ -720,6 +775,16 @@
     <div class="panel" id="panel-tabs">
       <ul class="tab-list" id="tab-list"></ul>
       <div class="empty-hint" id="tab-list-empty">No tabs found.</div>
+    </div>
+
+    <!-- Saved video timestamps -->
+    <div class="panel" id="panel-positions">
+      <div class="position-panel-header">
+        <span class="position-panel-title">Saved video timestamps</span>
+        <button class="btn-add btn-clear" id="clear-video-positions">Clear all</button>
+      </div>
+      <ul class="video-position-list" id="video-position-list"></ul>
+      <div class="empty-hint" id="video-position-empty">No saved timestamps yet. Turn on “Save video timestamps” and pause a video to save one.</div>
     </div>
 
   </div>

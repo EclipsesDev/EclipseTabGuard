@@ -1,5 +1,5 @@
-import type { Settings, TabInfo } from "../types/index.js";
-import { DEFAULT_SETTINGS } from "../types/index.js";
+import type { Settings, TabInfo, VideoPositionRecord } from "../types/index.js";
+import { normalizeSettings } from "../types/index.js";
 import type { StatsResponse } from "../background/index.js";
 
 const SETTINGS_KEY = "settings";
@@ -18,6 +18,7 @@ const toggleAudible = document.getElementById("toggle-audible") as HTMLInputElem
 const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElement;
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
 const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
+const toggleVideoPositions = document.getElementById("toggle-video-positions") as HTMLInputElement;
 const toggleCloseDuplicates = document.getElementById("toggle-close-duplicates") as HTMLInputElement;
 const autoSuspendChevron = document.getElementById("auto-suspend-chevron") as HTMLButtonElement | null;
 const autoSuspendSub = document.getElementById("auto-suspend-sub") as HTMLDivElement | null;
@@ -40,6 +41,17 @@ const toast = document.getElementById("toast")!;
 
 let whitelist: string[] = [];
 let blacklist: string[] = [];
+let toastTimer: number | null = null;
+
+function showToast(message: string): void {
+  toast.textContent = message;
+  toast.classList.add("show");
+  if (toastTimer != null) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toast.classList.remove("show");
+    toastTimer = null;
+  }, 2000);
+}
 
 
 // Animated counter (slot-roll effect)
@@ -204,13 +216,16 @@ blacklistInput.addEventListener("keydown", (e) => {
 
 // Load settings
 chrome.storage.sync.get(SETTINGS_KEY, (result) => {
-  const s: Settings = { ...DEFAULT_SETTINGS, ...(result[SETTINGS_KEY] as Partial<Settings> | undefined) };
+  const s: Settings = normalizeSettings(result[SETTINGS_KEY] as (Partial<Settings> & {
+    saveVideoPositions?: boolean;
+  }) | undefined);
   toggleEnabled.checked = s.enabled;
   togglePinned.checked = s.skipPinned;
   toggleAudible.checked = s.skipAudible;
   toggleLoading.checked = s.skipLoading;
   toggleStartup.checked = s.suspendOnStartup ?? false;
   toggleCacheWarm.checked = s.cacheWarm ?? false;
+  toggleVideoPositions.checked = s.saveVideoPositions;
   toggleCloseDuplicates.checked = s.closeDuplicates ?? false;
   if (closeDuplicatesMode && s.closeDuplicatesMode) closeDuplicatesMode.value = String(s.closeDuplicatesMode);
   if (closeDuplicatesKeepChecking) closeDuplicatesKeepChecking.checked = s.closeDuplicatesKeepChecking ?? true;
@@ -295,6 +310,7 @@ btnSave.addEventListener("click", () => {
     skipLoading: toggleLoading.checked,
     suspendOnStartup: toggleStartup.checked,
     cacheWarm: toggleCacheWarm.checked,
+    saveVideoPositions: toggleVideoPositions.checked,
     closeDuplicates: toggleCloseDuplicates.checked,
     closeDuplicatesMode: (closeDuplicatesMode ? Number(closeDuplicatesMode.value) : 1) as 1 | 2,
     closeDuplicatesKeepChecking: closeDuplicatesKeepChecking ? closeDuplicatesKeepChecking.checked : true,
@@ -306,8 +322,11 @@ btnSave.addEventListener("click", () => {
     blacklist,
   };
   chrome.storage.sync.set({ [SETTINGS_KEY]: s }, () => {
-    toast.classList.add("show");
-    setTimeout(() => toast.classList.remove("show"), 2000);
+    if (chrome.runtime.lastError) {
+      showToast("Could not save settings.");
+      return;
+    }
+    showToast("Settings saved!");
   });
 });
 
@@ -428,10 +447,110 @@ function refreshTabList(): void {
   });
 }
 
+function formatVideoTime(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainder = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function renderVideoPositions(records: VideoPositionRecord[]): void {
+  const listEl = document.getElementById("video-position-list")!;
+  const emptyEl = document.getElementById("video-position-empty")!;
+  const clearButton = document.getElementById("clear-video-positions") as HTMLButtonElement;
+  listEl.innerHTML = "";
+  emptyEl.style.display = records.length ? "none" : "block";
+  clearButton.style.display = records.length ? "inline-block" : "none";
+
+  for (const record of records) {
+    const item = document.createElement("li");
+    item.className = "video-position-item";
+
+    const info = document.createElement("div");
+    info.className = "video-position-info";
+    const title = document.createElement("div");
+    title.className = "video-position-title";
+    title.textContent = record.title || "(untitled video)";
+    const url = document.createElement("div");
+    url.className = "video-position-url";
+    try {
+      url.textContent = new URL(record.pageUrl).hostname;
+    } catch {
+      url.textContent = record.pageUrl;
+    }
+    info.append(title, url);
+
+    const time = document.createElement("span");
+    time.className = "video-position-time";
+    time.textContent = formatVideoTime(record.positionSeconds);
+    time.title = "Saved video timestamp";
+
+    const remove = document.createElement("button");
+    remove.className = "video-position-delete";
+    remove.textContent = "×";
+    remove.title = "Delete saved timestamp";
+    remove.setAttribute("aria-label", `Delete saved timestamp for ${record.title || "video"}`);
+    remove.addEventListener("click", () => {
+      chrome.runtime.sendMessage(
+        { type: "deleteVideoPosition", id: record.id },
+        (response: { ok?: boolean; error?: string } | undefined) => {
+          if (chrome.runtime.lastError || !response?.ok) {
+            showToast(response?.error ?? "Could not delete the saved timestamp.");
+            return;
+          }
+          showToast("Saved timestamp deleted.");
+          refreshVideoPositions();
+        }
+      );
+    });
+
+    item.append(info, time, remove);
+    listEl.appendChild(item);
+  }
+}
+
+function refreshVideoPositions(): void {
+  chrome.runtime.sendMessage(
+    { type: "getVideoPositions" },
+    (response: { records?: VideoPositionRecord[]; error?: string } | undefined) => {
+      if (chrome.runtime.lastError || !response?.records) {
+        showToast(response?.error ?? "Could not load saved video timestamps.");
+        return;
+      }
+      renderVideoPositions(response.records);
+    }
+  );
+}
+
+document.getElementById("clear-video-positions")!.addEventListener("click", () => {
+  if (!window.confirm("Delete all saved video timestamps?")) return;
+  chrome.runtime.sendMessage(
+    { type: "clearVideoPositions" },
+    (response: { ok?: boolean; error?: string } | undefined) => {
+      if (chrome.runtime.lastError || !response?.ok) {
+        showToast(response?.error ?? "Could not clear saved video timestamps.");
+        return;
+      }
+      showToast("Saved timestamps cleared.");
+      refreshVideoPositions();
+    }
+  );
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes["savedVideoPositions"]) return;
+  const value = changes["savedVideoPositions"].newValue as Record<string, VideoPositionRecord> | undefined;
+  renderVideoPositions(Object.values(value ?? {}).sort((a, b) => b.updatedAt - a.updatedAt));
+});
+
 // Refresh tab list when Tabs panel is opened
 document.querySelectorAll<HTMLButtonElement>(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (btn.dataset["tab"] === "tabs") refreshTabList();
+    if (btn.dataset["tab"] === "positions") refreshVideoPositions();
   });
 });
 

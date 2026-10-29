@@ -13,8 +13,12 @@ export type Settings = {
   /** Suspend all background tabs immediately when the browser starts */
   suspendOnStartup: boolean;
   /** Periodically pre-fetch suspended tab URLs to warm the HTTP cache (BETA) */
-  cacheWarm: boolean;  /** How often (in minutes) cache warming runs. Default: 10 */
-  cacheWarmIntervalMinutes: number;  /** Domain or URL patterns to never suspend */
+  cacheWarm: boolean;
+  /** How often (in minutes) cache warming runs. Default: 10 */
+  cacheWarmIntervalMinutes: number;
+  /** Save and restore video timestamps when a video is paused */
+  saveVideoPositions: boolean;
+  /** Domain or URL patterns to never suspend */
   whitelist: string[];
   /** Domain or URL patterns to always suspend immediately (ignores timeout) */
   blacklist: string[];
@@ -44,6 +48,46 @@ export type TabInfo = {
   windowId: number;
 };
 
+export type VideoPositionRecord = {
+  id: string;
+  pageUrl: string;
+  title: string;
+  videoIndex: number;
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedAt: number;
+};
+
+export function createVideoPositionId(pageUrl: string, videoIndex: number): string {
+  let canonicalUrl = pageUrl;
+  let isYouTubeVideo = false;
+  try {
+    const url = new URL(pageUrl);
+    url.hash = "";
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "");
+    let videoId: string | null = null;
+
+    if (hostname === "youtu.be") {
+      videoId = url.pathname.split("/").filter(Boolean)[0] ?? null;
+    } else if (hostname === "youtube.com" || hostname.endsWith(".youtube.com") || hostname === "youtube-nocookie.com") {
+      if (url.pathname === "/watch") {
+        videoId = url.searchParams.get("v");
+      } else {
+        videoId = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/]+)/)?.[1] ?? null;
+      }
+    }
+
+    canonicalUrl = videoId
+      ? `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
+      : url.href;
+    isYouTubeVideo = videoId != null;
+  } catch {
+    canonicalUrl = pageUrl;
+  }
+
+  return JSON.stringify([canonicalUrl, isYouTubeVideo ? 0 : videoIndex]);
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   timeoutMinutes: 3,
@@ -54,6 +98,7 @@ export const DEFAULT_SETTINGS: Settings = {
   suspendOnStartup: true,
   cacheWarm: false,
   cacheWarmIntervalMinutes: 10,
+  saveVideoPositions: false,
   closeDuplicates: false,
   closeDuplicatesMode: 2,
   closeDuplicatesKeepChecking: true,
@@ -61,3 +106,21 @@ export const DEFAULT_SETTINGS: Settings = {
   whitelist: [],
   blacklist: [],
 };
+
+export type StoredSettings = Partial<Settings> & {
+  rememberVideoPositions?: boolean;
+};
+
+export function normalizeSettings(settings?: StoredSettings): Settings {
+  if (!settings) return { ...DEFAULT_SETTINGS };
+
+  const { rememberVideoPositions, ...currentSettings } = settings;
+  return {
+    ...DEFAULT_SETTINGS,
+    ...currentSettings,
+    saveVideoPositions:
+      currentSettings.saveVideoPositions ??
+      rememberVideoPositions ??
+      DEFAULT_SETTINGS.saveVideoPositions,
+  };
+}
