@@ -468,6 +468,9 @@ function renderVideoPositions(records: VideoPositionRecord[]): void {
   for (const record of records) {
     const item = document.createElement("li");
     item.className = "video-position-item";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.title = "Open this video";
 
     const info = document.createElement("div");
     info.className = "video-position-info";
@@ -505,6 +508,28 @@ function renderVideoPositions(records: VideoPositionRecord[]): void {
           refreshVideoPositions();
         }
       );
+    });
+
+    const openVideo = (): void => {
+      chrome.runtime.sendMessage(
+        { type: "openVideoPosition", record },
+        (response: { ok?: boolean; error?: string } | undefined) => {
+          if (chrome.runtime.lastError || !response?.ok) {
+            showToast(response?.error ?? "Could not open this video.");
+            return;
+          }
+          window.close();
+        }
+      );
+    };
+    item.addEventListener("click", (event) => {
+      if ((event.target as HTMLElement).closest(".video-position-delete")) return;
+      openVideo();
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openVideo();
     });
 
     item.append(info, time, remove);

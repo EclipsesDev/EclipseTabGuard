@@ -678,6 +678,42 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === "openVideoPosition") {
+    const record = msg.record as Partial<VideoPositionRecord> | undefined;
+    if (
+      !record ||
+      typeof record.id !== "string" ||
+      typeof record.pageUrl !== "string" ||
+      typeof record.videoIndex !== "number" ||
+      !Number.isInteger(record.videoIndex) ||
+      record.videoIndex < 0
+    ) {
+      sendResponse({ ok: false, error: "Invalid saved video." });
+      return;
+    }
+
+    void (async () => {
+      const tabs = await chrome.tabs.query({});
+      const existingTab = tabs.find((tab) =>
+        tab.id != null &&
+        typeof tab.url === "string" &&
+        createVideoPositionId(tab.url, record.videoIndex!) === record.id
+      );
+
+      if (existingTab?.id != null) {
+        await chrome.tabs.update(existingTab.id, { active: true });
+        await chrome.windows.update(existingTab.windowId, { focused: true });
+      } else {
+        await chrome.tabs.create({ url: record.pageUrl });
+      }
+      sendResponse({ ok: true });
+    })().catch((error: unknown) => {
+      console.error("EclipseTabGuard could not open a saved video:", error);
+      sendResponse({ ok: false, error: "Could not open this video." });
+    });
+    return true;
+  }
+
   if (msg.type === "getStats") {
     (async () => {
       try {

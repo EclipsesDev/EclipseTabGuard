@@ -12,6 +12,7 @@ if (!globalState.__eclipseTabGuardVideoPositionMonitor) {
 function initialize(): void {
   let enabled = false;
   let observer: MutationObserver | null = null;
+  let observerPending = false;
   const attachedVideos = new WeakSet<HTMLVideoElement>();
   let restoreRequests = new WeakMap<HTMLVideoElement, string>();
 
@@ -135,14 +136,18 @@ function initialize(): void {
     document.querySelectorAll<HTMLVideoElement>("video").forEach(attachVideo);
   }
 
-  function setEnabled(value: boolean): void {
-    if (enabled === value) return;
-    enabled = value;
-    restoreRequests = new WeakMap<HTMLVideoElement, string>();
+  function observeDocument(): void {
+    if (!enabled || observer) return;
 
-    if (!enabled) {
-      observer?.disconnect();
-      observer = null;
+    const root = document.documentElement;
+    if (!root) {
+      if (!observerPending) {
+        observerPending = true;
+        document.addEventListener("DOMContentLoaded", () => {
+          observerPending = false;
+          observeDocument();
+        }, { once: true });
+      }
       return;
     }
 
@@ -157,7 +162,21 @@ function initialize(): void {
         }
       }
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(root, { childList: true, subtree: true });
+  }
+
+  function setEnabled(value: boolean): void {
+    if (enabled === value) return;
+    enabled = value;
+    restoreRequests = new WeakMap<HTMLVideoElement, string>();
+
+    if (!enabled) {
+      observer?.disconnect();
+      observer = null;
+      return;
+    }
+
+    observeDocument();
   }
 
   chrome.storage.onChanged.addListener((changes, area) => {
