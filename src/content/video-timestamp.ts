@@ -30,14 +30,192 @@ function initialize(): void {
     return { id: createVideoPositionId(pageUrl, videoIndex), pageUrl, videoIndex };
   }
 
-  function sendDelete(id: string): void {
+  function sendDelete(id: string, onComplete?: (ok: boolean) => void): void {
     chrome.runtime.sendMessage({ type: "deleteVideoPosition", id }, (response: { ok?: boolean } | undefined) => {
       if (chrome.runtime.lastError) {
         console.warn("EclipseTabGuard could not clear a saved video timestamp:", chrome.runtime.lastError.message);
+        onComplete?.(false);
       } else if (!response?.ok) {
         console.warn("EclipseTabGuard could not clear a saved video timestamp.");
+        onComplete?.(false);
+      } else {
+        onComplete?.(true);
       }
     });
+  }
+
+  function showSaveNotice(
+    id: string,
+    previousRecord: VideoPositionRecord | null,
+    pendingRecord: VideoPositionRecord | null
+  ): void {
+    const noticeId = "eclipse-tab-guard-video-save-notice";
+    const existing = document.getElementById(noticeId);
+    existing?.remove();
+
+    const notice = document.createElement("div");
+    notice.id = noticeId;
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
+    Object.assign(notice.style, {
+      alignItems: "stretch",
+      background: "linear-gradient(135deg, #202124 0%, #292b58 100%)",
+      border: "1px solid rgba(138, 180, 248, 0.55)",
+      borderLeft: "4px solid #8ab4f8",
+      borderRadius: "10px",
+      bottom: "20px",
+      boxShadow: "0 8px 28px rgba(0, 0, 0, 0.5)",
+      color: "#f1f3f4",
+      display: "flex",
+      flexDirection: "column",
+      font: "14px/1.4 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      left: "20px",
+      maxWidth: "min(390px, calc(100vw - 40px))",
+      minWidth: "280px",
+      padding: "14px 16px",
+      position: "fixed",
+      zIndex: "2147483647",
+    });
+
+    const header = document.createElement("div");
+    Object.assign(header.style, {
+      alignItems: "center",
+      display: "flex",
+      gap: "8px",
+    });
+    const icon = document.createElement("span");
+    icon.textContent = previousRecord ? "↻" : "✓";
+    icon.setAttribute("aria-hidden", "true");
+    icon.style.color = "#8ab4f8";
+    icon.style.fontSize = "20px";
+    icon.style.fontWeight = "700";
+    const message = document.createElement("strong");
+    message.textContent = previousRecord
+      ? "Update saved timestamp?"
+      : "Video timestamp saved";
+    header.append(icon, message);
+    notice.append(header);
+
+    const detail = document.createElement("span");
+    detail.textContent = previousRecord
+      ? "A timestamp already exists for this video. Choose whether to replace it."
+      : "This position will be restored when you return to the video.";
+    Object.assign(detail.style, {
+      color: "#d8dbe5",
+      fontSize: "12px",
+      marginTop: "4px",
+    });
+    notice.append(detail);
+
+    const actions = document.createElement("div");
+    Object.assign(actions.style, {
+      display: "flex",
+      gap: "8px",
+      marginTop: "12px",
+    });
+
+    const update = document.createElement("button");
+    update.type = "button";
+    update.textContent = previousRecord ? "Update timestamp" : "Don't save";
+    Object.assign(update.style, {
+      background: "#8ab4f8",
+      border: "0",
+      borderRadius: "5px",
+      color: "#17233d",
+      cursor: "pointer",
+      font: "inherit",
+      fontSize: "12px",
+      fontWeight: "700",
+      padding: "7px 10px",
+    });
+
+    const finish = (ok: boolean, updating: boolean): void => {
+      if (ok) {
+        message.textContent = updating ? "Timestamp updated" : "Video timestamp not saved";
+        detail.textContent = updating
+          ? "The new position will be restored when you return to the video."
+          : "The previous timestamp is still being kept.";
+        actions.remove();
+        window.setTimeout(() => notice.remove(), 2200);
+      } else {
+        update.disabled = false;
+        update.textContent = "Try again";
+        detail.textContent = updating
+          ? "Could not update the timestamp."
+          : "Could not remove the timestamp.";
+      }
+    };
+
+    update.addEventListener("click", () => {
+      update.disabled = true;
+      update.textContent = previousRecord ? "Updating..." : "Removing...";
+
+      if (previousRecord) {
+        if (!pendingRecord) {
+          finish(false, true);
+          return;
+        }
+        chrome.runtime.sendMessage(
+          { type: "updateVideoPosition", record: pendingRecord },
+          (response: { ok?: boolean } | undefined) => {
+            if (chrome.runtime.lastError) {
+              console.warn("EclipseTabGuard could not update the video timestamp:", chrome.runtime.lastError.message);
+              finish(false, true);
+            } else {
+              finish(response?.ok === true, true);
+            }
+          }
+        );
+      } else {
+        sendDelete(id, (ok) => finish(ok, false));
+      }
+    });
+    actions.append(update);
+
+    if (previousRecord) {
+      const keep = document.createElement("button");
+      keep.type = "button";
+      keep.textContent = "Keep previous";
+      Object.assign(keep.style, {
+        background: "rgba(255, 255, 255, 0.12)",
+        border: "1px solid rgba(255, 255, 255, 0.3)",
+        borderRadius: "5px",
+        color: "#f1f3f4",
+        cursor: "pointer",
+        font: "inherit",
+        fontSize: "12px",
+        fontWeight: "600",
+        padding: "7px 10px",
+      });
+      keep.addEventListener("click", () => {
+        notice.remove();
+      });
+      actions.append(keep);
+    }
+    notice.append(actions);
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "Dismiss timestamp notification");
+    dismiss.textContent = "×";
+    Object.assign(dismiss.style, {
+      background: "transparent",
+      border: "0",
+      color: "#bdc1c6",
+      cursor: "pointer",
+      font: "20px/1 system-ui, sans-serif",
+      padding: "0",
+      position: "absolute",
+      right: "8px",
+      top: "6px",
+    });
+    dismiss.addEventListener("click", () => notice.remove());
+    notice.append(dismiss);
+
+    document.documentElement.append(notice);
+    window.setTimeout(() => {
+      if (notice.isConnected) notice.remove();
+    }, previousRecord ? 10000 : 6000);
   }
 
   function savePosition(video: HTMLVideoElement): void {
@@ -59,11 +237,21 @@ function initialize(): void {
         positionSeconds: video.currentTime,
         durationSeconds: Number.isFinite(video.duration) ? video.duration : 0,
       },
-    }, (response: { ok?: boolean } | undefined) => {
+    }, (response: {
+      ok?: boolean;
+      previousRecord?: VideoPositionRecord | null;
+      pendingRecord?: VideoPositionRecord | null;
+    } | undefined) => {
       if (chrome.runtime.lastError) {
         console.warn("EclipseTabGuard could not save a video timestamp:", chrome.runtime.lastError.message);
       } else if (!response?.ok) {
         console.warn("EclipseTabGuard could not save a video timestamp.");
+      } else {
+        showSaveNotice(
+          identity.id,
+          response.previousRecord ?? null,
+          response.pendingRecord ?? null
+        );
       }
     });
   }

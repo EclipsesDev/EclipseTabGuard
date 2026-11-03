@@ -609,13 +609,45 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     const id = createVideoPositionId(input.pageUrl, input.videoIndex);
+    let previousRecord: VideoPositionRecord | null = null;
     void updateVideoPositions((positions) => {
-      positions[id] = { ...input, id, updatedAt: Date.now() };
+      previousRecord = positions[id] ?? null;
+      if (!previousRecord) {
+        positions[id] = { ...input, id, updatedAt: Date.now() };
+      }
     }).then(
-      () => sendResponse({ ok: true }),
+      () => sendResponse({
+        ok: true,
+        previousRecord,
+        pendingRecord: previousRecord ? { ...input, id } : null,
+      }),
       (error: unknown) => {
         console.error("EclipseTabGuard could not save a video timestamp:", error);
         sendResponse({ ok: false, error: "Could not save this video timestamp." });
+      }
+    );
+    return true;
+  }
+
+  if (msg.type === "updateVideoPosition") {
+    const record = msg.record as Partial<VideoPositionRecord> | undefined;
+    const input = normalizeVideoPositionInput(record);
+    if (
+      !input ||
+      typeof record?.id !== "string" ||
+      record.id !== createVideoPositionId(input.pageUrl, input.videoIndex)
+    ) {
+      sendResponse({ ok: false, error: "Invalid previous video timestamp." });
+      return;
+    }
+
+    void updateVideoPositions((positions) => {
+      positions[record.id!] = { ...input, id: record.id!, updatedAt: Date.now() };
+    }).then(
+      () => sendResponse({ ok: true }),
+      (error: unknown) => {
+        console.error("EclipseTabGuard could not update the video timestamp:", error);
+        sendResponse({ ok: false, error: "Could not update the video timestamp." });
       }
     );
     return true;
