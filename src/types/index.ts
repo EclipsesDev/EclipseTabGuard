@@ -1,3 +1,5 @@
+export type VideoTimestampThresholdMode = "none" | "alert" | "save";
+
 export type Settings = {
   enabled: boolean;
   /** Minutes a tab must be inactive before being suspended. Default: 3 */
@@ -17,7 +19,15 @@ export type Settings = {
   /** How often (in minutes) cache warming runs. Default: 10 */
   cacheWarmIntervalMinutes: number;
   /** Save and restore video timestamps when a video is paused */
-  saveVideoPositions: boolean;
+  saveVideoTimestamps: boolean;
+  /** Show a notification after a video timestamp is saved */
+  showVideoTimestampAlerts: boolean;
+  /** Apply the minimum change to alerts, saves, or neither */
+  videoTimestampThresholdMode: VideoTimestampThresholdMode;
+  /** Minimum change in seconds for the selected threshold mode */
+  videoTimestampThresholdSeconds: number;
+  /** Suppress re-saving the same timestamp after an Undo */
+  videoTimestampUndoCooldownSeconds: number;
   /** Domain or URL patterns to never suspend */
   whitelist: string[];
   /** Domain or URL patterns to always suspend immediately (ignores timeout) */
@@ -48,17 +58,18 @@ export type TabInfo = {
   windowId: number;
 };
 
-export type VideoPositionRecord = {
+export type VideoTimestampRecord = {
   id: string;
   pageUrl: string;
   title: string;
   videoIndex: number;
-  positionSeconds: number;
+  timestampSeconds: number;
   durationSeconds: number;
   updatedAt: number;
+  revision?: string;
 };
 
-export function createVideoPositionId(pageUrl: string, videoIndex: number): string {
+export function createVideoTimestampId(pageUrl: string, videoIndex: number): string {
   let canonicalUrl = pageUrl;
   let isYouTubeVideo = false;
   try {
@@ -98,7 +109,11 @@ export const DEFAULT_SETTINGS: Settings = {
   suspendOnStartup: true,
   cacheWarm: false,
   cacheWarmIntervalMinutes: 10,
-  saveVideoPositions: false,
+  saveVideoTimestamps: false,
+  showVideoTimestampAlerts: true,
+  videoTimestampThresholdMode: "save",
+  videoTimestampThresholdSeconds: 30,
+  videoTimestampUndoCooldownSeconds: 10,
   closeDuplicates: false,
   closeDuplicatesMode: 2,
   closeDuplicatesKeepChecking: true,
@@ -108,19 +123,63 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export type StoredSettings = Partial<Settings> & {
+  saveVideoPositions?: boolean;
+  showVideoPositionAlerts?: boolean;
+  videoPositionThresholdMode?: VideoTimestampThresholdMode;
+  videoPositionThresholdSeconds?: number;
+  videoPositionUndoCooldownSeconds?: number;
+  rememberVideoTimestamps?: boolean;
   rememberVideoPositions?: boolean;
 };
 
 export function normalizeSettings(settings?: StoredSettings): Settings {
   if (!settings) return { ...DEFAULT_SETTINGS };
 
-  const { rememberVideoPositions, ...currentSettings } = settings;
+  const {
+    rememberVideoTimestamps,
+    rememberVideoPositions,
+    saveVideoPositions,
+    showVideoPositionAlerts,
+    videoPositionThresholdMode,
+    videoPositionThresholdSeconds,
+    videoPositionUndoCooldownSeconds,
+    ...currentSettings
+  } = settings;
+  const mode = currentSettings.videoTimestampThresholdMode ?? videoPositionThresholdMode;
+  const seconds = currentSettings.videoTimestampThresholdSeconds ?? videoPositionThresholdSeconds;
+  const undoCooldownSeconds = currentSettings.videoTimestampUndoCooldownSeconds ?? videoPositionUndoCooldownSeconds;
+  const alerts = currentSettings.showVideoTimestampAlerts ?? showVideoPositionAlerts;
+  if (mode !== undefined && mode !== "none" && mode !== "alert" && mode !== "save") {
+    console.warn("EclipseTabGuard ignored an invalid video timestamp threshold mode:", mode);
+  }
+  if (seconds !== undefined && (!Number.isInteger(seconds) || seconds < 1 || seconds > 86400)) {
+    console.warn("EclipseTabGuard ignored an invalid video timestamp threshold:", seconds);
+  }
+  if (undoCooldownSeconds !== undefined &&
+    (!Number.isInteger(undoCooldownSeconds) || undoCooldownSeconds < 0 || undoCooldownSeconds > 86400)) {
+    console.warn("EclipseTabGuard ignored an invalid video timestamp undo cooldown:", undoCooldownSeconds);
+  }
+  if (alerts !== undefined && typeof alerts !== "boolean") {
+    console.warn("EclipseTabGuard ignored an invalid video timestamp alert setting:", alerts);
+  }
   return {
     ...DEFAULT_SETTINGS,
     ...currentSettings,
-    saveVideoPositions:
-      currentSettings.saveVideoPositions ??
+    saveVideoTimestamps:
+      currentSettings.saveVideoTimestamps ??
+      saveVideoPositions ??
+      rememberVideoTimestamps ??
       rememberVideoPositions ??
-      DEFAULT_SETTINGS.saveVideoPositions,
+      DEFAULT_SETTINGS.saveVideoTimestamps,
+    showVideoTimestampAlerts: typeof alerts === "boolean" ? alerts : DEFAULT_SETTINGS.showVideoTimestampAlerts,
+    videoTimestampThresholdMode:
+      mode === "none" || mode === "alert" || mode === "save" ? mode : DEFAULT_SETTINGS.videoTimestampThresholdMode,
+    videoTimestampThresholdSeconds:
+      typeof seconds === "number" && Number.isInteger(seconds) && seconds >= 1 && seconds <= 86400
+        ? seconds : DEFAULT_SETTINGS.videoTimestampThresholdSeconds,
+    videoTimestampUndoCooldownSeconds:
+      typeof undoCooldownSeconds === "number" && Number.isInteger(undoCooldownSeconds) &&
+        undoCooldownSeconds >= 0 && undoCooldownSeconds <= 86400
+        ? undoCooldownSeconds : DEFAULT_SETTINGS.videoTimestampUndoCooldownSeconds,
   };
 }

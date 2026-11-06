@@ -486,7 +486,7 @@
     .badge-suspended { background: rgba(100,100,140,0.2); color: #666; }
     .badge-pinned   { background: rgba(251,191,36,0.15); color: #fbbf24; }
 
-    .position-panel-header {
+    .timestamp-panel-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -500,14 +500,14 @@
       border: 1px solid rgba(239,68,68,0.25);
     }
     .btn-clear:hover { filter: brightness(1.2); }
-    .video-position-list {
+    .video-timestamp-list {
       list-style: none;
       max-height: 190px;
       overflow-y: auto;
       scrollbar-width: thin;
       scrollbar-color: #2e2e4a transparent;
     }
-    .video-position-item {
+    .video-timestamp-item {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -518,17 +518,17 @@
       border-left: 2px solid var(--accent);
       cursor: pointer;
     }
-    .video-position-item:hover, .video-position-item:focus-visible { background: var(--surface2); outline: none; }
-    .video-position-info { min-width: 0; flex: 1; }
-    .video-position-title, .video-position-url {
+    .video-timestamp-item:hover, .video-timestamp-item:focus-visible { background: var(--surface2); outline: none; }
+    .video-timestamp-info { min-width: 0; flex: 1; }
+    .video-timestamp-title, .video-timestamp-url {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .video-position-title { font-size: 11px; color: var(--text); }
-    .video-position-url { font-size: 10px; color: var(--muted); }
-    .video-position-time { flex-shrink: 0; font-size: 10px; color: var(--accent-light); font-variant-numeric: tabular-nums; }
-    .video-position-delete {
+    .video-timestamp-title { font-size: 11px; color: var(--text); }
+    .video-timestamp-url { font-size: 10px; color: var(--muted); }
+    .video-timestamp-time { flex-shrink: 0; font-size: 10px; color: var(--accent-light); font-variant-numeric: tabular-nums; }
+    .video-timestamp-delete {
       border: 0;
       background: none;
       color: #666;
@@ -536,7 +536,7 @@
       font-size: 16px;
       padding: 0 3px;
     }
-    .video-position-delete:hover { color: var(--danger); }
+    .video-timestamp-delete:hover { color: var(--danger); }
 
     /* Tab action buttons (shown on hover) */
     .tab-badge        { transition: opacity 0.12s var(--ease); }
@@ -680,7 +680,7 @@
     <button class="tab-btn" data-tab="whitelist">Whitelist</button>
     <button class="tab-btn" data-tab="blacklist">Blacklist</button>
     <button class="tab-btn" data-tab="tabs">Tabs</button>
-    <button class="tab-btn" data-tab="positions" title="Saved video timestamps">Videos</button>
+    <button class="tab-btn" data-tab="timestamps" title="Saved video timestamps">Videos</button>
   </div>
 
   <!-- Panels -->
@@ -748,8 +748,32 @@
         </div>
       </div>
       <div class="row">
-        <span class="row-label">Save video timestamps<span class="tag-beta">BETA</span><span class="tip" data-tip="Save the timestamp of videos when paused and restore it after a page reload. This works best for videos embedded directly on the page; timestamps stay on this device.">?</span></span>
-        <label class="toggle"><input type="checkbox" id="toggle-video-positions"><span class="slider"></span></label>
+        <span class="row-label"><button class="chevron" id="video-timestamps-chevron" title="Video timestamp options" aria-label="Video timestamp options" aria-expanded="false" aria-controls="video-timestamps-sub">&#8250;</button> Save video timestamps<span class="tag-beta">BETA</span><span class="tip" data-tip="Automatically save the latest timestamp when a video is paused, and restore it after a page reload. This works best for videos embedded directly on the page; timestamps stay on this device.">?</span></span>
+        <label class="toggle"><input type="checkbox" id="toggle-video-timestamps"><span class="slider"></span></label>
+      </div>
+      <div class="sub-field" id="video-timestamps-sub">
+        <div class="field">
+          <label class="field-label" for="video-timestamp-alerts">Show save alerts<span class="tip" data-tip="Show a notification with Undo after saving. Errors are still shown when alerts are off.">?</span></label>
+          <label class="toggle"><input type="checkbox" id="video-timestamp-alerts"><span class="slider"></span></label>
+        </div>
+        <div class="field">
+          <label class="field-label" for="video-timestamp-threshold-mode">Minimum change applies to<span class="tip" data-tip="Compare the current timestamp with the last saved timestamp, forwards or backwards. The first timestamp is always saved. Alerts-only filtering has no effect when save alerts are off.">?</span></label>
+          <select id="video-timestamp-threshold-mode" class="select">
+            <option value="none">Neither</option>
+            <option value="alert">Alerts only</option>
+            <option value="save">Saving</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="video-timestamp-threshold-seconds">Minimum change</label>
+          <input type="number" id="video-timestamp-threshold-seconds" min="1" max="86400" step="1" value="5">
+          <span class="field-unit">sec</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="video-timestamp-undo-cooldown">Undo cooldown<span class="tip" data-tip="After Undo removes a new timestamp, ignore pauses for this video for this long. Set to 0 to disable.">?</span></label>
+          <input type="number" id="video-timestamp-undo-cooldown" min="0" max="86400" step="1" value="10">
+          <span class="field-unit">sec</span>
+        </div>
       </div>
     </div>
 
@@ -780,13 +804,13 @@
     </div>
 
     <!-- Saved video timestamps -->
-    <div class="panel" id="panel-positions">
-      <div class="position-panel-header">
+    <div class="panel" id="panel-timestamps">
+      <div class="timestamp-panel-header">
         <span class="position-panel-title">Saved video timestamps</span>
-        <button class="btn-add btn-clear" id="clear-video-positions">Clear all</button>
+        <button class="btn-add btn-clear" id="clear-video-timestamps">Clear all</button>
       </div>
-      <ul class="video-position-list" id="video-position-list"></ul>
-      <div class="empty-hint" id="video-position-empty">No saved timestamps yet. Turn on “Save video timestamps” and pause a video to save one.</div>
+      <ul class="video-timestamp-list" id="video-timestamp-list"></ul>
+      <div class="empty-hint" id="video-timestamp-empty">No saved timestamps yet. Turn on “Save video timestamps” and pause a video to save one.</div>
     </div>
 
   </div>

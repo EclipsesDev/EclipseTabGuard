@@ -15,7 +15,7 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 - **Suspend on startup** — optionally suspend all background tabs the moment the browser opens
 - **Suspend Now** — manually trigger suspension of all eligible tabs instantly
 - **Cache warming** *(beta)* — periodically re-fetches suspended tab URLs in the background to keep them fresh in the HTTP cache, so they load faster when clicked
-- **Save video timestamps** *(beta)* — optionally save video timestamps when paused and restore them after a page reload; saved timestamps can be managed from the popup's Videos panel
+- **Save video timestamps** *(beta)* — automatically save the latest timestamp when paused and restore it after a page reload; briefly undo a save in the notification, or manage saved timestamps from the popup's Videos panel
 
 ## Smart skip rules
 
@@ -24,12 +24,15 @@ EclipseTabGuard automatically **suspends** browser tabs that haven't been used f
 | Skip the currently active tab | always on |
 | Skip pinned tabs | off |
 | Skip tabs playing audio | on |
-| Skip tabs still loading | on |
+| Skip tabs still loading | off |
 | Suspend on startup | on |
 | Inactivity timeout | 3 minutes |
 | Cache warming | off |
 | Cache warm interval | 10 minutes |
 | Save video timestamps | off |
+| Video save alerts | on |
+| Video minimum change | 30 seconds (not applied by default) |
+| Video undo cooldown | 10 seconds (same video) |
 
 ## Storage
 

@@ -1,4 +1,4 @@
-import type { Settings, TabInfo, VideoPositionRecord } from "../types/index.js";
+import type { Settings, TabInfo, VideoTimestampRecord } from "../types/index.js";
 import { normalizeSettings } from "../types/index.js";
 import type { StatsResponse } from "../background/index.js";
 
@@ -18,7 +18,13 @@ const toggleAudible = document.getElementById("toggle-audible") as HTMLInputElem
 const toggleLoading = document.getElementById("toggle-loading") as HTMLInputElement;
 const toggleStartup = document.getElementById("toggle-startup") as HTMLInputElement;
 const toggleCacheWarm = document.getElementById("toggle-cache-warm") as HTMLInputElement;
-const toggleVideoPositions = document.getElementById("toggle-video-positions") as HTMLInputElement;
+const toggleVideoTimestamps = document.getElementById("toggle-video-timestamps") as HTMLInputElement;
+const videoTimestampsChevron = document.getElementById("video-timestamps-chevron") as HTMLButtonElement;
+const videoTimestampsSub = document.getElementById("video-timestamps-sub") as HTMLDivElement;
+const videoTimestampAlerts = document.getElementById("video-timestamp-alerts") as HTMLInputElement;
+const videoTimestampThresholdMode = document.getElementById("video-timestamp-threshold-mode") as HTMLSelectElement;
+const videoTimestampThresholdSeconds = document.getElementById("video-timestamp-threshold-seconds") as HTMLInputElement;
+const videoTimestampUndoCooldown = document.getElementById("video-timestamp-undo-cooldown") as HTMLInputElement;
 const toggleCloseDuplicates = document.getElementById("toggle-close-duplicates") as HTMLInputElement;
 const autoSuspendChevron = document.getElementById("auto-suspend-chevron") as HTMLButtonElement | null;
 const autoSuspendSub = document.getElementById("auto-suspend-sub") as HTMLDivElement | null;
@@ -136,6 +142,12 @@ cacheWarmChevron.addEventListener("click", () => {
   cacheWarmChevron.setAttribute("aria-expanded", String(open));
 });
 
+videoTimestampsChevron.addEventListener("click", () => {
+  const open = videoTimestampsSub.classList.toggle("open");
+  videoTimestampsChevron.classList.toggle("open", open);
+  videoTimestampsChevron.setAttribute("aria-expanded", String(open));
+});
+
 // Domain list rendering
 function renderDomainList(
   items: string[],
@@ -217,7 +229,7 @@ blacklistInput.addEventListener("keydown", (e) => {
 // Load settings
 chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   const s: Settings = normalizeSettings(result[SETTINGS_KEY] as (Partial<Settings> & {
-    saveVideoPositions?: boolean;
+    saveVideoTimestamps?: boolean;
   }) | undefined);
   toggleEnabled.checked = s.enabled;
   togglePinned.checked = s.skipPinned;
@@ -225,7 +237,11 @@ chrome.storage.sync.get(SETTINGS_KEY, (result) => {
   toggleLoading.checked = s.skipLoading;
   toggleStartup.checked = s.suspendOnStartup ?? false;
   toggleCacheWarm.checked = s.cacheWarm ?? false;
-  toggleVideoPositions.checked = s.saveVideoPositions;
+  toggleVideoTimestamps.checked = s.saveVideoTimestamps;
+  videoTimestampAlerts.checked = s.showVideoTimestampAlerts;
+  videoTimestampThresholdMode.value = s.videoTimestampThresholdMode;
+  videoTimestampThresholdSeconds.value = String(s.videoTimestampThresholdSeconds);
+  videoTimestampUndoCooldown.value = String(s.videoTimestampUndoCooldownSeconds);
   toggleCloseDuplicates.checked = s.closeDuplicates ?? false;
   if (closeDuplicatesMode && s.closeDuplicatesMode) closeDuplicatesMode.value = String(s.closeDuplicatesMode);
   if (closeDuplicatesKeepChecking) closeDuplicatesKeepChecking.checked = s.closeDuplicatesKeepChecking ?? true;
@@ -302,6 +318,23 @@ document.querySelectorAll<HTMLElement>('.tip').forEach((el) => {
 
 // Save
 btnSave.addEventListener("click", () => {
+  const videoThreshold = Number(videoTimestampThresholdSeconds.value);
+  if (!Number.isInteger(videoThreshold) || videoThreshold < 1 || videoThreshold > 86400) {
+    showToast("Video minimum change must be between 1 and 86400 seconds.");
+    videoTimestampThresholdSeconds.focus();
+    return;
+  }
+  const videoUndoCooldown = Number(videoTimestampUndoCooldown.value);
+  if (!Number.isInteger(videoUndoCooldown) || videoUndoCooldown < 0 || videoUndoCooldown > 86400) {
+    showToast("Undo cooldown must be between 0 and 86400 seconds.");
+    videoTimestampUndoCooldown.focus();
+    return;
+  }
+  const thresholdMode = videoTimestampThresholdMode.value;
+  if (thresholdMode !== "none" && thresholdMode !== "alert" && thresholdMode !== "save") {
+    showToast("Choose a valid video timestamp threshold mode.");
+    return;
+  }
   const timeout = Math.max(1, Math.min(1440, Number(timeoutInput.value) || 30));
   const s: Settings = {
     enabled: toggleEnabled.checked,
@@ -310,7 +343,11 @@ btnSave.addEventListener("click", () => {
     skipLoading: toggleLoading.checked,
     suspendOnStartup: toggleStartup.checked,
     cacheWarm: toggleCacheWarm.checked,
-    saveVideoPositions: toggleVideoPositions.checked,
+    saveVideoTimestamps: toggleVideoTimestamps.checked,
+    showVideoTimestampAlerts: videoTimestampAlerts.checked,
+    videoTimestampThresholdMode: thresholdMode,
+    videoTimestampThresholdSeconds: videoThreshold,
+    videoTimestampUndoCooldownSeconds: videoUndoCooldown,
     closeDuplicates: toggleCloseDuplicates.checked,
     closeDuplicatesMode: (closeDuplicatesMode ? Number(closeDuplicatesMode.value) : 1) as 1 | 2,
     closeDuplicatesKeepChecking: closeDuplicatesKeepChecking ? closeDuplicatesKeepChecking.checked : true,
@@ -457,28 +494,28 @@ function formatVideoTime(seconds: number): string {
     : `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
-function renderVideoPositions(records: VideoPositionRecord[]): void {
-  const listEl = document.getElementById("video-position-list")!;
-  const emptyEl = document.getElementById("video-position-empty")!;
-  const clearButton = document.getElementById("clear-video-positions") as HTMLButtonElement;
+function renderVideoTimestamps(records: VideoTimestampRecord[]): void {
+  const listEl = document.getElementById("video-timestamp-list")!;
+  const emptyEl = document.getElementById("video-timestamp-empty")!;
+  const clearButton = document.getElementById("clear-video-timestamps") as HTMLButtonElement;
   listEl.innerHTML = "";
   emptyEl.style.display = records.length ? "none" : "block";
   clearButton.style.display = records.length ? "inline-block" : "none";
 
   for (const record of records) {
     const item = document.createElement("li");
-    item.className = "video-position-item";
+    item.className = "video-timestamp-item";
     item.tabIndex = 0;
     item.setAttribute("role", "button");
     item.title = "Open this video";
 
     const info = document.createElement("div");
-    info.className = "video-position-info";
+    info.className = "video-timestamp-info";
     const title = document.createElement("div");
-    title.className = "video-position-title";
+    title.className = "video-timestamp-title";
     title.textContent = record.title || "(untitled video)";
     const url = document.createElement("div");
-    url.className = "video-position-url";
+    url.className = "video-timestamp-url";
     try {
       url.textContent = new URL(record.pageUrl).hostname;
     } catch {
@@ -487,32 +524,32 @@ function renderVideoPositions(records: VideoPositionRecord[]): void {
     info.append(title, url);
 
     const time = document.createElement("span");
-    time.className = "video-position-time";
-    time.textContent = formatVideoTime(record.positionSeconds);
+    time.className = "video-timestamp-time";
+    time.textContent = formatVideoTime(record.timestampSeconds);
     time.title = "Saved video timestamp";
 
     const remove = document.createElement("button");
-    remove.className = "video-position-delete";
+    remove.className = "video-timestamp-delete";
     remove.textContent = "×";
     remove.title = "Delete saved timestamp";
     remove.setAttribute("aria-label", `Delete saved timestamp for ${record.title || "video"}`);
     remove.addEventListener("click", () => {
       chrome.runtime.sendMessage(
-        { type: "deleteVideoPosition", id: record.id },
+        { type: "deleteVideoTimestamp", id: record.id },
         (response: { ok?: boolean; error?: string } | undefined) => {
           if (chrome.runtime.lastError || !response?.ok) {
             showToast(response?.error ?? "Could not delete the saved timestamp.");
             return;
           }
           showToast("Saved timestamp deleted.");
-          refreshVideoPositions();
+          refreshVideoTimestamps();
         }
       );
     });
 
     const openVideo = (): void => {
       chrome.runtime.sendMessage(
-        { type: "openVideoPosition", record },
+        { type: "openVideoTimestamp", record },
         (response: { ok?: boolean; error?: string } | undefined) => {
           if (chrome.runtime.lastError || !response?.ok) {
             showToast(response?.error ?? "Could not open this video.");
@@ -523,7 +560,7 @@ function renderVideoPositions(records: VideoPositionRecord[]): void {
       );
     };
     item.addEventListener("click", (event) => {
-      if ((event.target as HTMLElement).closest(".video-position-delete")) return;
+      if ((event.target as HTMLElement).closest(".video-timestamp-delete")) return;
       openVideo();
     });
     item.addEventListener("keydown", (event) => {
@@ -537,45 +574,45 @@ function renderVideoPositions(records: VideoPositionRecord[]): void {
   }
 }
 
-function refreshVideoPositions(): void {
+function refreshVideoTimestamps(): void {
   chrome.runtime.sendMessage(
-    { type: "getVideoPositions" },
-    (response: { records?: VideoPositionRecord[]; error?: string } | undefined) => {
+    { type: "getVideoTimestamps" },
+    (response: { records?: VideoTimestampRecord[]; error?: string } | undefined) => {
       if (chrome.runtime.lastError || !response?.records) {
         showToast(response?.error ?? "Could not load saved video timestamps.");
         return;
       }
-      renderVideoPositions(response.records);
+      renderVideoTimestamps(response.records);
     }
   );
 }
 
-document.getElementById("clear-video-positions")!.addEventListener("click", () => {
+document.getElementById("clear-video-timestamps")!.addEventListener("click", () => {
   if (!window.confirm("Delete all saved video timestamps?")) return;
   chrome.runtime.sendMessage(
-    { type: "clearVideoPositions" },
+    { type: "clearVideoTimestamps" },
     (response: { ok?: boolean; error?: string } | undefined) => {
       if (chrome.runtime.lastError || !response?.ok) {
         showToast(response?.error ?? "Could not clear saved video timestamps.");
         return;
       }
       showToast("Saved timestamps cleared.");
-      refreshVideoPositions();
+      refreshVideoTimestamps();
     }
   );
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes["savedVideoPositions"]) return;
-  const value = changes["savedVideoPositions"].newValue as Record<string, VideoPositionRecord> | undefined;
-  renderVideoPositions(Object.values(value ?? {}).sort((a, b) => b.updatedAt - a.updatedAt));
+  if (area !== "local" || !changes["savedVideoTimestamps"]) return;
+  const value = changes["savedVideoTimestamps"].newValue as Record<string, VideoTimestampRecord> | undefined;
+  renderVideoTimestamps(Object.values(value ?? {}).sort((a, b) => b.updatedAt - a.updatedAt));
 });
 
 // Refresh tab list when Tabs panel is opened
 document.querySelectorAll<HTMLButtonElement>(".tab-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     if (btn.dataset["tab"] === "tabs") refreshTabList();
-    if (btn.dataset["tab"] === "positions") refreshVideoPositions();
+    if (btn.dataset["tab"] === "timestamps") refreshVideoTimestamps();
   });
 });
 

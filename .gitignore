@@ -1,3 +1,4 @@
 dist/*
 eclipsetabguard.zip
 node_modules/
+tests/
